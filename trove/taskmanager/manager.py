@@ -82,12 +82,16 @@ class Manager(periodic_task.PeriodicTasks):
 
     def create_instance(self, context, instance_id, name, flavor,
                         image_id, databases, users, service_type,
-                        volume_size, security_groups, backup_id):
+                        volume_size, security_groups, backup_id, overrides):
         instance_tasks = FreshInstanceTasks.load(context, instance_id)
         instance_tasks.create_instance(flavor, image_id,
                                        databases, users, service_type,
                                        volume_size, security_groups,
-                                       backup_id)
+                                       backup_id, overrides)
+
+    def update_overrides(self, context, instance_id, overrides):
+        instance_tasks = models.BuiltInstanceTasks.load(context, instance_id)
+        instance_tasks.update_overrides(overrides)
 
     if CONF.exists_notification_transformer:
         @periodic_task.periodic_task(

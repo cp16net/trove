@@ -22,6 +22,8 @@ from trove.common import exception
 from trove.common import pagination
 from trove.common import utils
 from trove.common import wsgi
+from trove.common.exception import ModelNotFoundError
+from trove.configuration.models import Configuration
 from trove.extensions.mysql.common import populate_validated_databases
 from trove.extensions.mysql.common import populate_users
 from trove.instance import models, views
@@ -186,6 +188,22 @@ class InstanceController(wsgi.Controller):
         name = body['instance']['name']
         flavor_ref = body['instance']['flavorRef']
         flavor_id = utils.get_id_from_href(flavor_ref)
+
+        if 'configurationRef' in body['instance']:
+            configurationRef = body['instance']['configurationRef']
+            configuration_id = utils.get_id_from_href(configurationRef)
+
+            # ensure a valid configuration has been passed in and that it
+            # belongs to the user requesting it.
+            try:
+                Configuration.load(context, configuration_id)
+            except ModelNotFoundError:
+                raise exception.NotFound(
+                    message='Configuration group %s could not be found'
+                    % configuration_id)
+        else:
+            configuration_id = None
+
         databases = populate_validated_databases(
             body['instance'].get('databases', []))
         users = None
@@ -208,7 +226,108 @@ class InstanceController(wsgi.Controller):
         instance = models.Instance.create(context, name, flavor_id,
                                           image_id, databases, users,
                                           service_type, volume_size,
-                                          backup_id)
+                                          backup_id, configuration_id)
 
         view = views.InstanceDetailView(instance, req=req)
         return wsgi.Result(view.data(), 200)
+
+    def update(self, req, id, body, tenant_id):
+        ## TODO(jodom): add support for updating config grp.
+        LOG.info(_("Updating instance for tenant id %s" % tenant_id))
+        LOG.info(_("req: %s" % req))
+        LOG.info(_("body: %s" % body))
+        context = req.environ[wsgi.CONTEXT_KEY]
+
+        instance = models.Instance.load(context, id)
+
+        # update name, if supplied
+        if 'name' in body["instance"]:
+            models.Instance.update_db(instance, name=body["instance"]["name"])
+
+        # if configurationRef is set, then we will update the instance to use
+        # the new configuration.  If configurationRef is empty, we want to
+        # disassociate the instance from the configuration group and remove the
+        # active overrides file.
+        if 'configurationRef' in body["instance"]:
+            configurationRef = body["instance"]["configurationRef"]
+
+            if configurationRef:
+                configuration_id = utils.get_id_from_href(
+                    body["instance"]["configurationRef"])
+
+                configuration = models.Configuration.load(
+                    context, configuration_id)
+
+                overrides = {}
+                for i in configuration.items:
+                    overrides[i.configuration_key] = i.configuration_value
+
+                LOG.info(overrides)
+
+                instance.update_overrides(overrides)
+                models.Instance.update_db(instance,
+                                          configuration_id=configuration_id)
+            else:
+                instance.update_overrides({})
+                models.Instance.update_db(instance, configuration_id=None)
+
+        return wsgi.Result(None, 202)
+
+    @staticmethod
+    def _validate_body_not_empty(body):
+        """Check that the body is not empty"""
+        if not body:
+            msg = "The request contains an empty body"
+            raise exception.TroveError(msg)
+
+    @staticmethod
+    def _validate_resize_volume(volume):
+        """
+        We are going to check that volume resizing data is present.
+        """
+        if 'size' not in volume:
+            raise exception.BadRequest(
+                "Missing 'size' property of 'volume' in request body.")
+        InstanceController._validate_volume_size(volume['size'])
+
+    @staticmethod
+    def _validate_volume_size(size):
+        """Validate the various possible errors for volume size"""
+        try:
+            volume_size = float(size)
+        except (ValueError, TypeError) as err:
+            LOG.error(err)
+            msg = ("Required element/key - instance volume 'size' was not "
+                   "specified as a number (value was %s)." % size)
+            raise exception.TroveError(msg)
+        if int(volume_size) != volume_size or int(volume_size) < 1:
+            msg = ("Volume 'size' needs to be a positive "
+                   "integer value, %s cannot be accepted."
+                   % volume_size)
+            raise exception.TroveError(msg)
+
+    @staticmethod
+    def _validate(body):
+        """Validate that the request has all the required parameters"""
+        InstanceController._validate_body_not_empty(body)
+
+        try:
+            body['instance']
+            body['instance']['flavorRef']
+            name = body['instance'].get('name', '').strip()
+            if not name:
+                raise exception.MissingKey(key='name')
+            if CONF.trove_volume_support:
+                if body['instance'].get('volume', None):
+                    if body['instance']['volume'].get('size', None):
+                        volume_size = body['instance']['volume']['size']
+                        InstanceController._validate_volume_size(volume_size)
+                    else:
+                        raise exception.MissingKey(key="size")
+                else:
+                    raise exception.MissingKey(key="volume")
+
+        except KeyError as e:
+            LOG.error(_("Create Instance Required field(s) - %s") % e)
+            raise exception.TroveError("Required element/key - %s "
+                                          "was not specified" % e)

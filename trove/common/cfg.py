@@ -17,6 +17,9 @@
 """Routines for configuring Trove."""
 
 from oslo.config import cfg
+from trove.openstack.common import log as logging
+
+import json
 import os.path
 
 path_opts = [
@@ -25,6 +28,8 @@ path_opts = [
                                                     '../')),
                help='Directory where the trove python module is installed'),
 ]
+
+LOG = logging.getLogger(__name__)
 
 common_opts = [
     cfg.StrOpt('sql_connection',
@@ -187,12 +192,30 @@ common_opts = [
     cfg.StrOpt('guest_config',
                default='$pybasedir/etc/trove/trove-guestagent.conf.sample',
                help="Path to guestagent config file"),
+    cfg.StrOpt('validation_rules',
+               default="/etc/trove/validation-rules.json"),
+    cfg.StrOpt('validation_rule_file',
+               default="/etc/trove/validation-rules.json"),
 ]
 
 
 CONF = cfg.CONF
 CONF.register_opts(path_opts)
 CONF.register_opts(common_opts)
+
+cfg.validation_rules = dict()
+
+
+def get_validation_rules():
+
+    if not cfg.validation_rules:
+        validation_config = open(CONF.validation_rule_file)
+        rules = json.load(validation_config)
+        validation_config.close()
+
+        cfg.validation_rules = rules
+
+    return cfg.validation_rules
 
 
 def custom_parser(parsername, parser):

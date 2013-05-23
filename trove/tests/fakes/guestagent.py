@@ -208,7 +208,8 @@ class FakeGuest(object):
         return self.users.get((username, hostname), None)
 
     def prepare(self, memory_mb, databases, users, device_path=None,
-                mount_point=None, backup_id=None, config_contents=None):
+                mount_point=None, backup_id=None, config_contents=None,
+                overrides=None):
         from trove.instance.models import DBInstance
         from trove.instance.models import InstanceServiceStatus
         from trove.instance.models import ServiceStatuses
@@ -307,6 +308,10 @@ class FakeGuest(object):
             backup.save()
         self.event_spawn(1.0, finish_create_backup)
 
+    def update_overrides(self, overrides):
+        # There is nothing to do here, this just involves writing or deleting
+        # a mysql overrides configuration file
+        pass
 
 def get_or_create(id):
     if id not in DB:

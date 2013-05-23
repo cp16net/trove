@@ -641,7 +641,7 @@ class MySqlAppInstallTest(MySqlAppTest):
         self.mysql_starts_successfully()
         sqlalchemy.create_engine = Mock()
 
-        self.mySqlApp.secure('contents')
+        self.mySqlApp.secure('contents', None)
 
         self.assertTrue(self.mySqlApp.stop_db.called)
         self.assertTrue(self.mySqlApp._write_mycnf.called)
@@ -673,7 +673,7 @@ class MySqlAppInstallTest(MySqlAppTest):
         self.mysql_starts_successfully()
         sqlalchemy.create_engine = Mock()
 
-        self.assertRaises(IOError, self.mySqlApp.secure, "foo")
+        self.assertRaises(IOError, self.mySqlApp.secure, "foo", None)
 
         self.assertTrue(self.mySqlApp.stop_db.called)
         self.assertTrue(self.mySqlApp._write_mycnf.called)
@@ -746,7 +746,7 @@ class MySqlAppMockTest(testtools.TestCase):
             any(), any(), any()).thenReturn(True)
         app = MySqlApp(mock_status)
 
-        self.assertRaises(TypeError, app.secure, None)
+        self.assertRaises(TypeError, app.secure, None, None)
 
         verify(mock_conn, atleast=2).execute(any())
         inorder.verify(mock_status).wait_for_real_status_to_change_to(
@@ -767,8 +767,8 @@ class MySqlAppMockTest(testtools.TestCase):
         when(mock_status).wait_for_real_status_to_change_to(
             any(), any(), any()).thenReturn(True)
         app = MySqlApp(mock_status)
-        when(app)._write_mycnf(any(), any()).thenReturn(True)
-        app.secure('foo')
+        when(app)._write_mycnf(any(), any(), None).thenReturn(True)
+        app.secure('foo', None)
         verify(mock_conn, never).execute(TextClauseMatcher('root'))
 
 

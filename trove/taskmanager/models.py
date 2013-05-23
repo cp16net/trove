@@ -127,7 +127,7 @@ class ConfigurationMixin(object):
 class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
     def create_instance(self, flavor, image_id, databases, users,
                         service_type, volume_size, security_groups,
-                        backup_id):
+                        backup_id, overrides):
         if use_nova_server_volume:
             server, volume_info = self._create_server_volume(
                 flavor['id'],
@@ -154,7 +154,7 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
         if server:
             self._guest_prepare(server, flavor['ram'], volume_info,
                                 databases, users, backup_id,
-                                config.config_contents)
+                                config.config_contents, overrides)
 
         if not self.db_info.task_status.is_error:
             self.update_db(task_status=inst_models.InstanceTasks.NONE)
@@ -352,14 +352,15 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
 
     def _guest_prepare(self, server, flavor_ram, volume_info,
                        databases, users, backup_id=None,
-                       config_contents=None):
+                       config_contents=None, overrides=None):
         LOG.info("Entering guest_prepare.")
         # Now wait for the response from the create to do additional work
         self.guest.prepare(flavor_ram, databases, users,
                            device_path=volume_info['device_path'],
                            mount_point=volume_info['mount_point'],
                            backup_id=backup_id,
-                           config_contents=config_contents)
+                           config_contents=config_contents,
+                           overrides=overrides)
 
     def _create_dns_entry(self):
         LOG.debug("%s: Creating dns entry for instance: %s" %
@@ -547,6 +548,14 @@ class BuiltInstanceTasks(BuiltInstance, NotifyMixin, ConfigurationMixin):
         finally:
             LOG.debug("Restarting FINALLY  %s " % self.id)
             self.update_db(task_status=inst_models.InstanceTasks.NONE)
+
+    def update_overrides(self, overrides):
+        LOG.debug("Updating configuration overrides on instance %s" % self.id)
+        try:
+            self.guest.update_overrides(overrides)
+            LOG.debug("Configuration override update successful.")
+        except GuestError:
+            LOG.error("Failed to update configuration overrides.")
 
     def _refresh_compute_server_info(self):
         """Refreshes the compute server field."""
