@@ -1,3 +1,21 @@
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+
+# Copyright 2011 OpenStack Foundation
+# Copyright 2013 Rackspace Hosting
+# All Rights Reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+
 import os
 import passlib.utils
 import re
@@ -29,10 +47,11 @@ ENGINE = None
 PREPARING = False
 UUID = False
 
-TMP_MYCNF = "/tmp/my.cnf.tmp"
-MYSQL_BASE_DIR = "/var/lib/mysql"
-
 CONF = cfg.CONF
+
+MYSQL_BASE_DIR = CONF.mount_point
+TMP_MYCNF = "/tmp/my.cnf.tmp"
+
 INCLUDE_MARKER_OPERATORS = {
     True: ">=",
     False: ">"
@@ -41,6 +60,8 @@ INCLUDE_MARKER_OPERATORS = {
 MYSQL_CONFIG = "/etc/mysql/my.cnf"
 MYSQL_SERVICE_CANDIDATES = ["mysql", "mysqld", "mysql-server"]
 MYSQL_BIN_CANDIDATES = ["/usr/sbin/mysqld", "/usr/libexec/mysqld"]
+MYCNF_OVERRIDES = "/etc/mysql/conf.d/overrides.cnf"
+MYCNF_OVERRIDES_TMP = "/tmp/overrides.cnf.tmp"
 
 
 # Create a package impl
@@ -575,7 +596,7 @@ class MySqlApp(object):
     def complete_install_or_restart(self):
         self.status.end_install_or_restart()
 
-    def secure(self, config_contents):
+    def secure(self, config_contents, overrides):
         LOG.info(_("Generating admin password..."))
         admin_password = generate_random_password()
         clear_expired_password()
@@ -586,7 +607,7 @@ class MySqlApp(object):
             self._create_admin_user(client, admin_password)
 
         self.stop_db()
-        self._write_mycnf(admin_password, config_contents)
+        self._write_mycnf(admin_password, config_contents, overrides)
         self.start_mysql()
 
         LOG.info(_("Dbaas secure complete."))
@@ -669,6 +690,35 @@ class MySqlApp(object):
         finally:
             self.status.end_install_or_restart()
 
+    def update_overrides(self, overrides_file, remove=False):
+        """
+        This function will either update or remove the MySQL overrides.cnf file
+        If remove is set to True the function will remove the overrides file.
+
+        :param overrides:
+        :param remove:
+        :return:
+        """
+
+        if overrides_file:
+            LOG.debug("writing new overrides.cnf config file")
+            self._write_config_overrides(overrides_file)
+        if remove:
+            LOG.debug("removing overrides.cnf config file")
+            self._remove_overrides()
+
+    def apply_overrides(self, overrides):
+        LOG.debug("applying overrides to mysql")
+        with LocalSqlClient(get_engine()) as client:
+            LOG.debug("updating overrides values in running daemon")
+            for k, v in overrides.iteritems():
+                q = sql_query.SetServerVariable(key=k, value=v)
+                t = text(str(q))
+                try:
+                    client.execute(t)
+                except exc.OperationalError:
+                    LOG.exception("Unable to set %s with value %s" % (k, v))
+
     def _replace_mycnf_with_template(self, template_path, original_path):
         LOG.debug("replacing the mycnf with template")
         LOG.debug("template_path(%s) original_path(%s)"
@@ -718,7 +768,7 @@ class MySqlApp(object):
                 if "No such file or directory" not in str(pe):
                     raise
 
-    def _write_mycnf(self, admin_password, config_contents):
+    def _write_mycnf(self, admin_password, config_contents, overrides=None):
         """
         Install the set of mysql my.cnf templates.
         Update the os_admin user and password to the my.cnf
@@ -740,6 +790,37 @@ class MySqlApp(object):
                                    MYSQL_CONFIG)
 
         self.wipe_ib_logfiles()
+
+        # write configuration file overrides
+        if overrides:
+            self._write_config_overrides(overrides)
+
+    def _write_config_overrides(self, overrideValues):
+        LOG.info(_("Writing new temp overrides.cnf file."))
+
+        with open(MYCNF_OVERRIDES_TMP, 'w') as overrides:
+            overrides.write(overrideValues)
+        LOG.info(_("Moving overrides.cnf into correct location."))
+        utils.execute_with_timeout("sudo", "mv", MYCNF_OVERRIDES_TMP,
+                                   MYCNF_OVERRIDES)
+
+        LOG.info(_("Setting permissions on overrides.cnf"))
+        utils.execute_with_timeout("sudo", "chmod", "0711",
+                                   MYCNF_OVERRIDES)
+
+    def _remove_overrides(self):
+        LOG.info(_("Removing overrides configuration file"))
+
+        try:
+            utils.execute_with_timeout("sudo", "rm", MYCNF_OVERRIDES)
+        except exception.ProcessExecutionError as pe:
+            LOG.error("Could not delete overrides configuration.")
+            LOG.error(pe)
+
+            # if the overrides file simply doesn't exist, we will proceed
+            # anyway since the file is removed.
+            if "No such file or directory" not in str(pe):
+                raise
 
     def start_mysql(self, update_db=False):
         LOG.info(_("Starting mysql..."))

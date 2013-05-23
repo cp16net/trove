@@ -86,7 +86,7 @@ class Manager(periodic_task.PeriodicTasks):
 
     def prepare(self, context, packages, databases, memory_mb, users,
                 device_path=None, mount_point=None, backup_id=None,
-                config_contents=None, root_password=None):
+                config_contents=None, root_password=None, overrides=None):
         """Makes ready DBAAS on a Guest container."""
         MySqlAppStatus.get().begin_install()
         # status end_mysql_install set with secure()
@@ -107,7 +107,7 @@ class Manager(periodic_task.PeriodicTasks):
         if backup_id:
             self._perform_restore(backup_id, context, CONF.mount_point, app)
         LOG.info(_("Securing mysql now."))
-        app.secure(config_contents)
+        app.secure(config_contents, overrides)
         enable_root_on_restore = (backup_id and MySqlAdmin().is_root_enabled())
         if root_password and not backup_id:
             app.secure_root(secure_remote_root=True)
@@ -155,3 +155,11 @@ class Manager(periodic_task.PeriodicTasks):
         :param backup_id: the db instance id of the backup task
         """
         backup.backup(context, backup_id)
+
+    def update_overrides(self, context, overrides):
+        app = MySqlApp(MySqlAppStatus.get())
+        app.update_overrides(overrides)
+
+    def apply_overrides(self, context, overrides):
+        app = MySqlApp(MySqlAppStatus.get())
+        app.apply_overrides(overrides)

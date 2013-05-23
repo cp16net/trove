@@ -12,14 +12,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import traceback
 import os.path
+import re
+import traceback
 from cinderclient import exceptions as cinder_exceptions
 from eventlet import greenthread
 from novaclient import exceptions as nova_exceptions
 from trove.common import cfg
 from trove.common import template
 from trove.common import utils
+from trove.common.configurations import do_configs_require_restart
 from trove.common.exception import GuestError
 from trove.common.exception import GuestTimeout
 from trove.common.exception import PollTimeOut
@@ -31,6 +33,7 @@ from trove.common.remote import create_dns_client
 from trove.common.remote import create_nova_client
 from trove.common.remote import create_heat_client
 from trove.common.remote import create_cinder_client
+from trove.configuration.models import Configuration
 from trove.extensions.security_group.models import SecurityGroup
 from trove.extensions.security_group.models import SecurityGroupRule
 from swiftclient.client import ClientException
@@ -139,11 +142,26 @@ class ConfigurationMixin(object):
         config.render()
         return config
 
+    def _render_override_config(self, service_type, flavor, instance_id,
+                                overrides=None):
+        config = template.OverrideConfigTemplate(
+            service_type, flavor, instance_id)
+        config.render(overrides=overrides)
+        return config
+
+    def _render_config_dict(self, service_type, flavor, instance_id):
+        config = template.SingleInstanceConfigTemplate(
+            service_type, flavor, instance_id)
+        ret = config.render_dict()
+        LOG.debug("the default template dict of mysqld section: %s" % ret)
+        return ret
+
 
 class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
     def create_instance(self, flavor, image_id, databases, users,
                         datastore_manager, packages, volume_size,
-                        backup_id, availability_zone, root_password):
+                        backup_id, availability_zone, root_password,
+                        overrides):
 
         LOG.debug(_("begin create_instance for id: %s") % self.id)
         security_groups = None
@@ -191,11 +209,16 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
                 availability_zone)
 
         config = self._render_config(datastore_manager, flavor, self.id)
+        config_overrides = self._render_override_config(datastore_manager,
+                                                        None,
+                                                        self.id,
+                                                        overrides=overrides)
 
         if server:
             self._guest_prepare(server, flavor['ram'], volume_info,
                                 packages, databases, users, backup_id,
-                                config.config_contents, root_password)
+                                config.config_contents, root_password,
+                                config_overrides.config_contents)
 
         if not self.db_info.task_status.is_error:
             self.update_db(task_status=inst_models.InstanceTasks.NONE)
@@ -508,7 +531,8 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
 
     def _guest_prepare(self, server, flavor_ram, volume_info,
                        packages, databases, users, backup_id=None,
-                       config_contents=None, root_password=None):
+                       config_contents=None, root_password=None,
+                       overrides=None):
         LOG.info(_("Entering guest_prepare"))
         # Now wait for the response from the create to do additional work
         self.guest.prepare(flavor_ram, packages, databases, users,
@@ -516,7 +540,8 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
                            mount_point=volume_info['mount_point'],
                            backup_id=backup_id,
                            config_contents=config_contents,
-                           root_password=root_password)
+                           root_password=root_password,
+                           overrides=overrides)
 
     def _create_dns_entry(self):
         LOG.debug(_("%(gt)s: Creating dns entry for instance: %(id)s") %
@@ -777,6 +802,70 @@ class BuiltInstanceTasks(BuiltInstance, NotifyMixin, ConfigurationMixin):
         finally:
             LOG.debug(_("Restarting FINALLY  %s ") % self.id)
             self.update_db(task_status=inst_models.InstanceTasks.NONE)
+
+    def update_overrides(self, overrides):
+        LOG.debug("Updating configuration overrides on instance %s" % self.id)
+        LOG.debug("overrides: %s" % overrides)
+        # todo(cp16net) How do we know what datastore type we have?
+        need_restart = do_configs_require_restart(overrides,
+                                                  datastore_type='mysql')
+        LOG.debug("do we need a restart?: %s" % need_restart)
+        if need_restart:
+            status = inst_models.InstanceTasks.RESTART_REQUIRED
+            self.update_db(task_status=status)
+
+        config_overrides = self._render_override_config(self.service_type,
+                                                        None,
+                                                        self.id,
+                                                        overrides=overrides)
+        try:
+            self.guest.update_overrides(config_overrides.config_contents)
+            if CONF.apply_dynamic_configuration:
+                self.guest.apply_overrides(overrides)
+            LOG.debug("Configuration overrides update successful.")
+        except GuestError:
+            LOG.error("Failed to update configuration overrides.")
+
+    def unassign_configuration(self, flavor, configuration_id):
+        LOG.debug("Unassigning the configuration id (%s) to the instance %s"
+                  % (self.configuration.id, self.id))
+
+        def _find_item(items, item_name):
+            # find the item in the list
+            for i in items:
+                if i[0] == item_name:
+                    return i
+            return None
+
+        def _convert_value(value):
+            # split the value and the size e.g. 512M=['512','M']
+            pattern = re.compile('(\d+)(\w+)')
+            split = pattern.findall(value)
+            if len(split) < 2:
+                return value
+            digits, size = split
+            if size == 'K':
+                ret = int(digits) * 1024
+            if size == 'M':
+                ret = int(digits) * 1024 ** 2
+            if size == 'G':
+                ret = int(digits) * 1024 ** 3
+            return str(ret)
+
+        default_config = self._render_config_dict(self.service_type,
+                                                  flavor,
+                                                  self.id)
+        LOG.debug("default mysqld section: %s" % default_config)
+        LOG.debug("self.configuration: %s" % self.configuration)
+
+        overrides = {}
+        config_items = Configuration.load_items(self.context, configuration_id)
+        for item in config_items:
+            LOG.debug("finding item(%s)" % item)
+            key, val = _find_item(default_config, item.configuration_key)
+            overrides[item.configuration_key] = _convert_value(val)
+        LOG.debug("setting the default variables in dict: %s" % overrides)
+        self.update_overrides(overrides)
 
     def _refresh_compute_server_info(self):
         """Refreshes the compute server field."""
