@@ -18,6 +18,7 @@
 
 import datetime
 import inspect
+import jinja2
 import re
 import signal
 import sys
@@ -34,6 +35,7 @@ from eventlet.green import subprocess
 from eventlet.timeout import Timeout
 
 from trove.common import exception
+from trove.common import cfg
 from trove.openstack.common import importutils
 from trove.openstack.common import log as logging
 from trove.openstack.common import processutils
@@ -48,6 +50,12 @@ import_module = importutils.import_module
 bool_from_string = openstack_utils.bool_from_string
 execute = processutils.execute
 isotime = timeutils.isotime
+
+CONF = cfg.CONF
+ENV = jinja2.Environment(loader=jinja2.ChoiceLoader([
+                         jinja2.FileSystemLoader("/etc/trove/templates"),
+                         jinja2.PackageLoader("trove", "templates")
+                         ]))
 
 
 def create_method_args_string(*args, **kwargs):

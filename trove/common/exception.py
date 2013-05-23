@@ -179,6 +179,13 @@ class UserAlreadyExists(BadRequest):
     message = _('A user with the name "%(name)s" already exists.')
 
 
+class InstanceAssignedToConfiguration(BadRequest):
+
+    message = _('Unable to delete configuration since an instance is '
+                'currently assigned to the configuration.  Unassign the '
+                'instance from the configuration and try again.')
+
+
 class UnprocessableEntity(TroveError):
 
     message = _("Unable to process the contained request")
@@ -352,3 +359,11 @@ class RestoreBackupIntegrityError(TroveError):
 
     message = _("Current Swift object checksum does not match original "
                 "checksum for backup %(backup_id)s.")
+
+
+class ConfigKeyNotFound(NotFound):
+    message = _("Config Key %(key)s not found")
+
+
+class NoConfigParserFound(NotFound):
+    message = _("No configuration parser found for service %(service_type)s")

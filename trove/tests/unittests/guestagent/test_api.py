@@ -242,6 +242,18 @@ class ApiTest(testtools.TestCase):
         self.api.create_backup('123')
         self._verify_rpc_cast(exp_msg)
 
+    def test_update_overrides(self):
+        exp_msg = RpcMsgMatcher('update_overrides', 'overrides')
+        self._mock_rpc_cast(exp_msg)
+        self.api.update_overrides('123')
+        self._verify_rpc_cast(exp_msg)
+
+    def test_apply_overrides(self):
+        exp_msg = RpcMsgMatcher('apply_overrides', 'overrides')
+        self._mock_rpc_cast(exp_msg)
+        self.api.apply_overrides('123')
+        self._verify_rpc_cast(exp_msg)
+
     def _verify_rpc_connection_and_cast(self, rpc, mock_conn, exp_msg):
         verify(rpc).create_connection(new=True)
         verify(mock_conn).create_consumer(self.api._get_routing_key(), None,
@@ -255,12 +267,13 @@ class ApiTest(testtools.TestCase):
         exp_msg = RpcMsgMatcher('prepare', 'memory_mb', 'packages',
                                 'databases', 'users', 'device_path',
                                 'mount_point', 'backup_id', 'config_contents',
-                                'root_password')
+                                'root_password', 'overrides')
 
         when(rpc).cast(any(), any(), exp_msg).thenReturn(None)
 
         self.api.prepare('2048', 'package1', 'db1', 'user1', '/dev/vdt',
-                         '/mnt/opt', 'bkup-1232', 'cont', '1-2-3-4')
+                         '/mnt/opt', 'bkup-1232', 'cont', '1-2-3-4',
+                         'override')
 
         self._verify_rpc_connection_and_cast(rpc, mock_conn, exp_msg)
 
@@ -271,11 +284,12 @@ class ApiTest(testtools.TestCase):
         exp_msg = RpcMsgMatcher('prepare', 'memory_mb', 'packages',
                                 'databases', 'users', 'device_path',
                                 'mount_point', 'backup_id', 'config_contents',
-                                'root_password')
+                                'root_password', 'overrides')
         when(rpc).cast(any(), any(), exp_msg).thenReturn(None)
 
         self.api.prepare('2048', 'package1', 'db1', 'user1', '/dev/vdt',
-                         '/mnt/opt', 'backup_id_123', 'cont', '1-2-3-4')
+                         '/mnt/opt', 'backup_id_123', 'cont', '1-2-3-4',
+                         'override')
 
         self._verify_rpc_connection_and_cast(rpc, mock_conn, exp_msg)
 
