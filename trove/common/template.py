@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import io
 import jinja2
 
 ENV = jinja2.Environment(loader=jinja2.ChoiceLoader([
@@ -20,10 +21,104 @@ ENV = jinja2.Environment(loader=jinja2.ChoiceLoader([
 ]))
 
 
+from ConfigParser import *
+
+
+class MyConfigParser(SafeConfigParser):
+    def _read(self, fp, fpname):
+        """
+          Parse a sectioned setup file.
+
+          The sections in setup file contains a title line at the top,
+          indicated by a name in square brackets (`[]'), plus key/value
+          options lines, indicated by `name: value' format lines.
+          Continuations are represented by an embedded newline then
+          leading whitespace.  Blank lines, lines beginning with a '#',
+          and just about everything else are ignored.
+        """
+
+        cursect = None                            # None, or a dictionary
+        optname = None
+        lineno = 0
+        e = None                                  # None, or an exception
+        while True:
+            line = fp.readline()
+            if not line:
+                break
+            lineno = lineno + 1
+            # comment or blank line?
+            if line.strip() == '' or line[0] in '#;':
+                continue
+            if line.split(None, 1)[0].lower() == 'rem' and line[0] in "rR":
+                # no leading whitespace
+                continue
+            # continuation line?
+            if line[0].isspace() and cursect is not None and optname:
+                value = line.strip()
+                if value:
+                    cursect[optname] = "%s\n%s" % (cursect[optname], value)
+            # a section header or option header?
+            else:
+                # is it a section header?
+                mo = self.SECTCRE.match(line)
+                if mo:
+                    sectname = mo.group('header')
+                    if sectname in self._sections:
+                        cursect = self._sections[sectname]
+                    elif sectname == DEFAULTSECT:
+                        cursect = self._defaults
+                    else:
+                        cursect = self._dict()
+                        cursect['__name__'] = sectname
+                        self._sections[sectname] = cursect
+                    # So sections can't start with a continuation line
+                    optname = None
+                # no section header in the file?
+                elif cursect is None:
+                    raise MissingSectionHeaderError(fpname, lineno, line)
+                # an option line?
+                else:
+                    mo = self.OPTCRE.match(line)
+                    if mo:
+                        optname, vi, optval = mo.group('option', 'vi', 'value')
+                        if vi in ('=', ':') and ';' in optval:
+                            # ';' is a comment delimiter only if it follows
+                            # a spacing character
+                            pos = optval.find(';')
+                            if pos != -1 and optval[pos-1].isspace():
+                                optval = optval[:pos]
+                        optval = optval.strip()
+                        # allow empty values
+                        if optval == '""':
+                            optval = ''
+                        optname = self.optionxform(optname.rstrip())
+                        cursect[optname] = optval
+                    elif line:
+                        # (cp16net) changed this to support a line without a
+                        # key value pair.
+                        # example in my.cnf:
+                        # [mysqld]
+                        # skip-external-locking
+                        optname = line.strip()
+                        cursect[optname] = None
+                    else:
+                        # a non-fatal parsing error occurred.  set up the
+                        # exception but keep going. the exception will be
+                        # raised at the end of the file and will contain a
+                        # list of all bogus lines
+                        if not e:
+                            e = ParsingError(fpname)
+                        e.append(lineno, repr(line))
+        # if any parsing errors occurred, raise an exception
+        if e:
+            raise e
+
+
 class SingleInstanceConfigTemplate(object):
     """ This class selects a single configuration file by database type for
     rendering on the guest """
-    def __init__(self, service_type, flavor_dict, instance_id):
+    def __init__(self, service_type, flavor_dict, instance_id,
+                 overrides=False):
         """ Constructor
 
         :param service_type: The database type.
@@ -35,11 +130,14 @@ class SingleInstanceConfigTemplate(object):
 
         """
         self.flavor_dict = flavor_dict
-        template_filename = "%s.config.template" % service_type
+        if overrides:
+            template_filename = "%s.override.config.template" % service_type
+        else:
+            template_filename = "%s.config.template" % service_type
         self.template = ENV.get_template(template_filename)
         self.instance_id = instance_id
 
-    def render(self):
+    def render(self, **kwargs):
         """ Renders the jinja template
 
         :returns: str -- The rendered configuration file
@@ -47,8 +145,32 @@ class SingleInstanceConfigTemplate(object):
         """
         server_id = self._calculate_unique_id()
         self.config_contents = self.template.render(
-            flavor=self.flavor_dict, server_id=server_id)
+            flavor=self.flavor_dict, server_id=server_id, **kwargs)
         return self.config_contents
+
+    def render_dict(self):
+        config = self.render()
+        cfg = MyConfigParser()
+        # convert unicode to ascii because config parse was not happy
+        cfgstr = str(config)
+        good_cfg = self._remove_commented_lines(cfgstr)
+
+        cfg.readfp(io.BytesIO(str(good_cfg)))
+        return cfg.items("mysqld")
+
+    def _remove_commented_lines(self, config_str):
+        ret = []
+        for line in config_str.splitlines():
+            if line.startswith('#'):
+                continue
+            elif line.startswith('!'):
+                continue
+            elif line.startswith(':'):
+                continue
+            else:
+                ret.append(line)
+        rendered = "\n".join(ret)
+        return rendered
 
     def _calculate_unique_id(self):
         """

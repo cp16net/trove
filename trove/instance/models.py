@@ -21,12 +21,13 @@ from datetime import datetime
 from novaclient import exceptions as nova_exceptions
 from trove.common import cfg
 from trove.common import exception
-import trove.common.instance as rd_instance
+import trove.common.instance as tr_instance
 from trove.common.remote import create_dns_client
 from trove.common.remote import create_guest_client
 from trove.common.remote import create_nova_client
 from trove.common.remote import create_cinder_client
 from trove.common import utils
+from trove.configuration.models import Configuration
 from trove.extensions.security_group.models import SecurityGroup
 from trove.db import get_db_api
 from trove.db import models as dbmodels
@@ -68,6 +69,7 @@ class InstanceStatus(object):
     BACKUP = "BACKUP"
     SHUTDOWN = "SHUTDOWN"
     ERROR = "ERROR"
+    RESTART_REQUIRED = "RESTART_REQUIRED"
 
 
 def validate_volume_size(size):
@@ -182,6 +184,8 @@ class SimpleInstance(object):
             return InstanceStatus.REBOOT
         if 'RESIZING' == ACTION:
             return InstanceStatus.RESIZE
+        if 'RESTART_REQUIRED' == ACTION:
+            return InstanceStatus.RESTART_REQUIRED
 
         ### Check for server status.
         if self.db_info.server_status in ["BUILD", "ERROR", "REBOOT",
@@ -205,10 +209,10 @@ class SimpleInstance(object):
 
         ### Check against the service status.
         # The service is only paused during a reboot.
-        if rd_instance.ServiceStatuses.PAUSED == self.service_status.status:
+        if tr_instance.ServiceStatuses.PAUSED == self.service_status.status:
             return InstanceStatus.REBOOT
         # If the service status is NEW, then we are building.
-        if rd_instance.ServiceStatuses.NEW == self.service_status.status:
+        if tr_instance.ServiceStatuses.NEW == self.service_status.status:
             return InstanceStatus.BUILD
 
         # For everything else we can look at the service status mapping.
@@ -233,6 +237,14 @@ class SimpleInstance(object):
     @property
     def root_password(self):
         return self.root_pass
+
+    @property
+    def configuration(self):
+        if self.db_info.configuration_id is not None:
+            return Configuration.load(self.context,
+                                      self.db_info.configuration_id)
+        else:
+            return None
 
 
 class DetailInstance(SimpleInstance):
@@ -344,7 +356,8 @@ class BaseInstance(SimpleInstance):
             LOG.debug(_("  ... deleting compute id = %s") %
                       self.db_info.compute_instance_id)
             LOG.debug(_(" ... setting status to DELETING."))
-            self.update_db(task_status=InstanceTasks.DELETING)
+            self.update_db(task_status=InstanceTasks.DELETING,
+                           configuration_id=None)
             task_api.API(self.context).delete_instance(self.id)
 
         deltas = {'instances': -1}
@@ -395,7 +408,7 @@ class BaseInstance(SimpleInstance):
 
     def set_servicestatus_deleted(self):
         del_instance = InstanceServiceStatus.find_by(instance_id=self.id)
-        del_instance.set_status(rd_instance.ServiceStatuses.DELETED)
+        del_instance.set_status(tr_instance.ServiceStatuses.DELETED)
         del_instance.save()
 
     @property
@@ -428,7 +441,7 @@ class Instance(BuiltInstance):
     @classmethod
     def create(cls, context, name, flavor_id, image_id,
                databases, users, service_type, volume_size, backup_id,
-               availability_zone=None):
+               availability_zone=None, configuration_id=None):
 
         client = create_nova_client(context)
         try:
@@ -462,14 +475,27 @@ class Instance(BuiltInstance):
                                         tenant_id=context.tenant,
                                         volume_size=volume_size,
                                         service_type=service_type,
-                                        task_status=InstanceTasks.BUILDING)
+                                        task_status=InstanceTasks.BUILDING,
+                                        configuration_id=configuration_id)
             LOG.debug(_("Tenant %(tenant)s created new "
                         "Trove instance %(db)s...") %
                       {'tenant': context.tenant, 'db': db_info.id})
 
+            # if a configuration group is associated with this instance,
+            # generate an overrides dict to pass into the instance creation
+            # method
+
+            overrides = {}
+            if configuration_id:
+                configuration_items = Configuration.load_items(context,
+                                                   id=configuration_id)
+
+                for i in configuration_items:
+                    overrides[i.configuration_key] = i.configuration_value
+
             service_status = InstanceServiceStatus.create(
                 instance_id=db_info.id,
-                status=rd_instance.ServiceStatuses.NEW)
+                status=tr_instance.ServiceStatuses.NEW)
 
             if CONF.trove_dns_support:
                 dns_client = create_dns_client(context)
@@ -486,7 +512,7 @@ class Instance(BuiltInstance):
                                                   service_type, volume_size,
                                                   backup_id,
                                                   availability_zone,
-                                                  root_password)
+                                                  root_password, overrides)
 
             return SimpleInstance(context, db_info, service_status,
                                   root_password)
@@ -494,6 +520,10 @@ class Instance(BuiltInstance):
         return run_with_quotas(context.tenant,
                                deltas,
                                _create_resources)
+
+    def get_flavor(self):
+        client = create_nova_client(self.context)
+        return client.flavors.get(self.flavor_id)
 
     def resize_flavor(self, new_flavor_id):
         self.validate_can_perform_action()
@@ -582,20 +612,58 @@ class Instance(BuiltInstance):
         """
         Raises exception if an instance action cannot currently be performed.
         """
+        # cases where action cannot be performed
         if self.db_info.server_status != 'ACTIVE':
             status = self.db_info.server_status
-        elif self.db_info.task_status != InstanceTasks.NONE:
+        elif (self.db_info.task_status != InstanceTasks.NONE and
+              self.db_info.task_status != InstanceTasks.RESTART_REQUIRED):
             status = self.db_info.task_status
         elif not self.service_status.status.action_is_allowed:
             status = self.status
         elif Backup.running(self.id):
             status = InstanceStatus.BACKUP
         else:
+            # action can be performed
             return
+
         msg = ("Instance is not currently available for an action to be "
                "performed (status was %s)." % status)
         LOG.error(msg)
         raise exception.UnprocessableEntity(msg)
+
+    def unassign_configuration(self):
+        LOG.debug("Unassigning the configuration id (%s) to the instance %s"
+                  % (self.configuration.id, self.id))
+        flavor = self.get_flavor()
+        config_id = self.configuration.id
+        task_api.API(self.context).unassign_configuration(self.id, flavor,
+                                                          config_id)
+        self.update_db(configuration_id=None)
+
+    def update_overrides(self, overrides):
+        LOG.debug("Updating or removing overrides for instance %s" % self.id)
+        # change the instance status to restart_required
+
+        def _get_item(key, dictList):
+            for item in dictList:
+                if key == item['name']:
+                    return item
+
+        def _do_configs_require_restart(overrides):
+            if not CONF.apply_dynamic_configuration:
+                return True
+            rules = cfg.get_validation_rules()
+            for key in overrides.iterkeys():
+                rule = _get_item(key, rules['configuration-parameters'])
+                LOG.debug("checking the rule: %s" % rule)
+                if not rule['dynamic']:
+                    return True
+            return False
+        need_restart = _do_configs_require_restart(overrides)
+        LOG.debug("do we need a restart?: %s" % need_restart)
+        if need_restart:
+            self.update_db(task_status=InstanceTasks.RESTART_REQUIRED)
+        task_api.API(self.context).update_overrides(self.id, overrides)
 
 
 def create_server_list_matcher(server_list):
@@ -692,7 +760,8 @@ class DBInstance(dbmodels.DatabaseModelBase):
 
     _data_fields = ['name', 'created', 'compute_instance_id',
                     'task_id', 'task_description', 'task_start_time',
-                    'volume_id', 'deleted', 'tenant_id', 'service_type']
+                    'volume_id', 'deleted', 'tenant_id', 'service_type',
+                    'configuration_id']
 
     def __init__(self, task_status, **kwargs):
         kwargs["task_id"] = task_status.code
@@ -736,11 +805,11 @@ class InstanceServiceStatus(dbmodels.DatabaseModelBase):
     def _validate(self, errors):
         if self.status is None:
             errors['status'] = "Cannot be none."
-        if rd_instance.ServiceStatus.from_code(self.status_id) is None:
+        if tr_instance.ServiceStatus.from_code(self.status_id) is None:
             errors['status_id'] = "Not valid."
 
     def get_status(self):
-        return rd_instance.ServiceStatus.from_code(self.status_id)
+        return tr_instance.ServiceStatus.from_code(self.status_id)
 
     def set_status(self, value):
         self.status_id = value.code
@@ -761,4 +830,4 @@ def persisted_models():
     }
 
 
-MYSQL_RESPONSIVE_STATUSES = [rd_instance.ServiceStatuses.RUNNING]
+MYSQL_RESPONSIVE_STATUSES = [tr_instance.ServiceStatuses.RUNNING]

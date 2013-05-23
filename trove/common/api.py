@@ -15,6 +15,8 @@
 import routes
 
 from trove.common import wsgi
+from trove.configuration.service import ConfigurationsController
+from trove.configuration.service import ParametersController
 from trove.flavor.service import FlavorController
 from trove.instance.service import InstanceController
 from trove.limits.service import LimitsController
@@ -32,6 +34,7 @@ class API(wsgi.Router):
         self._versions_router(mapper)
         self._limits_router(mapper)
         self._backups_router(mapper)
+        self._configurations_router(mapper)
 
     def _versions_router(self, mapper):
         versions_resource = VersionsController().create_resource()
@@ -41,7 +44,8 @@ class API(wsgi.Router):
         instance_resource = InstanceController().create_resource()
         path = "/{tenant_id}/instances"
         mapper.resource("instance", path, controller=instance_resource,
-                        member={'action': 'POST', 'backups': 'GET'})
+                        member={'action': 'POST', 'backups': 'GET',
+                                'configuration': 'GET'})
 
     def _flavor_router(self, mapper):
         flavor_resource = FlavorController().create_resource()
@@ -58,6 +62,47 @@ class API(wsgi.Router):
         path = "/{tenant_id}/backups"
         mapper.resource("backups", path, controller=backups_resource,
                         member={'action': 'POST'})
+
+    def _configurations_router(self, mapper):
+        parameters_resource = ParametersController().create_resource()
+        mapper.connect('/{tenant_id}/configurations/parameters',
+                       controller=parameters_resource,
+                       action='index',
+                       conditions={'method': ['GET']})
+        mapper.connect('/{tenant_id}/configurations/parameters/{id}',
+                       controller=parameters_resource,
+                       action='show',
+                       conditions={'method': ['GET']})
+
+        configuration_resource = ConfigurationsController().create_resource()
+        mapper.connect('/{tenant_id}/configurations',
+                       controller=configuration_resource,
+                       action='index',
+                       conditions={'method': ['GET']})
+        mapper.connect('/{tenant_id}/configurations',
+                       controller=configuration_resource,
+                       action='create',
+                       conditions={'method': ['POST']})
+        mapper.connect('/{tenant_id}/configurations/{id}',
+                       controller=configuration_resource,
+                       action='show',
+                       conditions={'method': ['GET']})
+        mapper.connect('/{tenant_id}/configurations/{id}/instances',
+                       controller=configuration_resource,
+                       action='instances',
+                       conditions={'method': ['GET']})
+        mapper.connect('/{tenant_id}/configurations/{id}',
+                       controller=configuration_resource,
+                       action='edit',
+                       conditions={'method': ['PATCH']})
+        mapper.connect('/{tenant_id}/configurations/{id}',
+                       controller=configuration_resource,
+                       action='update',
+                       conditions={'method': ['PUT']})
+        mapper.connect('/{tenant_id}/configurations/{id}',
+                       controller=configuration_resource,
+                       action='delete',
+                       conditions={'method': ['DELETE']})
 
 
 def app_factory(global_conf, **local_conf):

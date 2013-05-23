@@ -17,6 +17,9 @@
 """Routines for configuring Trove."""
 
 from oslo.config import cfg
+from trove.openstack.common import log as logging
+
+import json
 import os.path
 
 UNKNOWN_SERVICE_ID = 'unknown-service-id-error'
@@ -27,6 +30,8 @@ path_opts = [
                                                     '../')),
                help='Directory where the trove python module is installed'),
 ]
+
+LOG = logging.getLogger(__name__)
 
 common_opts = [
     cfg.StrOpt('sql_connection',
@@ -210,11 +215,28 @@ common_opts = [
                 help='Extention for default service managers.'
                      ' Allows to use custom managers for each of'
                      ' service type supported in trove'),
+    cfg.StrOpt('validation_rules',
+               default="/etc/trove/validation-rules.json"),
+    cfg.BoolOpt('apply_dynamic_configuration', default=True),
 ]
 
 CONF = cfg.CONF
 CONF.register_opts(path_opts)
 CONF.register_opts(common_opts)
+
+cfg.validation_rules = dict()
+
+
+def get_validation_rules():
+
+    if not cfg.validation_rules:
+        validation_config = open(CONF.validation_rules)
+        rules = json.load(validation_config)
+        validation_config.close()
+
+        cfg.validation_rules = rules
+
+    return cfg.validation_rules
 
 
 def custom_parser(parsername, parser):

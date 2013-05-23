@@ -102,7 +102,7 @@ class API(proxy.RpcProxy):
     def create_instance(self, instance_id, name, flavor, image_id,
                         databases, users, service_type, volume_size,
                         backup_id=None, availability_zone=None,
-                        root_password=None):
+                        root_password=None, overrides=None):
         LOG.debug("Making async call to create instance %s " % instance_id)
         self.cast(self.context,
                   self.make_msg("create_instance",
@@ -115,4 +115,24 @@ class API(proxy.RpcProxy):
                                 volume_size=volume_size,
                                 backup_id=backup_id,
                                 availability_zone=availability_zone,
-                                root_password=root_password))
+                                root_password=root_password,
+                                overrides=overrides))
+
+    def update_overrides(self, instance_id, overrides=None):
+        LOG.debug("Making async call to update configuration overrides for "
+                  "instance %s" % instance_id)
+
+        self.cast(self.context,
+                  self.make_msg("update_overrides",
+                                instance_id=instance_id,
+                                overrides=overrides))
+
+    def unassign_configuration(self, instance_id, flavor, configuration_id):
+        LOG.debug("Making async call to unassign configuration for "
+                  "instance %s" % instance_id)
+
+        self.cast(self.context,
+                  self.make_msg("unassign_configuration",
+                                instance_id=instance_id,
+                                flavor=self._transform_obj(flavor),
+                                configuration_id=configuration_id))
