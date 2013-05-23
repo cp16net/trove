@@ -50,6 +50,12 @@ class SingleInstanceConfigTemplate(object):
             flavor=self.flavor_dict, server_id=server_id)
         return self.config_contents
 
+    def render_dict(self):
+        cfg = self.render()
+        config = ConfigParser.ConfigParser()
+        config.readfp(io.BytesIO(cfg))
+        return config.get("mysqld")
+
     def _calculate_unique_id(self):
         """
         Returns a positive unique id based off of the instance id

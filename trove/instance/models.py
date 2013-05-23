@@ -27,6 +27,7 @@ from trove.common.remote import create_guest_client
 from trove.common.remote import create_nova_client
 from trove.common.remote import create_cinder_client
 from trove.common import utils
+from trove.configuration.models import Configuration
 from trove.extensions.security_group.models import SecurityGroup
 from trove.extensions.security_group.models import SecurityGroupRule
 from trove.db import get_db_api
@@ -229,6 +230,14 @@ class SimpleInstance(object):
     def service_type(self):
         return self.db_info.service_type
 
+    @property
+    def configuration(self):
+        if self.db_info.configuration_id is not None:
+            return Configuration.load(self.context,
+                                      self.db_info.configuration_id)
+        else:
+            return None
+
 
 class DetailInstance(SimpleInstance):
     """A detailed view of an Instnace.
@@ -423,7 +432,7 @@ class Instance(BuiltInstance):
     @classmethod
     def create(cls, context, name, flavor_id, image_id,
                databases, users, service_type, volume_size, backup_id,
-               availability_zone=None):
+               availability_zone=None, configuration_id=None):
 
         client = create_nova_client(context)
         try:
@@ -459,10 +468,23 @@ class Instance(BuiltInstance):
                                         tenant_id=context.tenant,
                                         volume_size=volume_size,
                                         service_type=service_type,
-                                        task_status=InstanceTasks.BUILDING)
+                                        task_status=InstanceTasks.BUILDING,
+                                        configuration_id=configuration_id)
             LOG.debug(_("Tenant %(tenant)s created new "
                         "Trove instance %(db)s...") %
                       {'tenant': context.tenant, 'db': db_info.id})
+
+            # if a configuration group is associated with this instance,
+            # generate an overrides dict to pass into the instance creation
+            # method
+
+            overrides = {}
+            if configuration_id:
+                configuration = Configuration.load(context,
+                                                   id=configuration_id)
+
+                for i in configuration.items:
+                    overrides[i.configuration_key] = i.configuration_value
 
             service_status = InstanceServiceStatus.create(
                 instance_id=db_info.id,
@@ -493,7 +515,7 @@ class Instance(BuiltInstance):
                                                   image_id, databases, users,
                                                   service_type, volume_size,
                                                   security_groups, backup_id,
-                                                  availability_zone)
+                                                  availability_zone, overrides)
 
             return SimpleInstance(context, db_info, service_status)
 
@@ -602,6 +624,19 @@ class Instance(BuiltInstance):
                "performed (status was %s)." % status)
         LOG.error(msg)
         raise exception.UnprocessableEntity(msg)
+
+    def unassign_configuration(self):
+        LOG.debug("Unassigning the configuration id (%s) to the instance %s"
+                  % (self.configuration.id, self.id))
+        client = create_nova_client(self.context)
+        flavor = client.flavors.get(self.flavor_id)
+        config_id = self.configuration.id
+        task_api.API(self.context).unassign_configuration(self.id, flavor, config_id)
+        self.update_db(configuration_id=None)
+
+    def update_overrides(self, overrides):
+        LOG.debug("Updating or removing overrides for instance %s" % self.id)
+        task_api.API(self.context).update_overrides(self.id, overrides)
 
 
 def create_server_list_matcher(server_list):

@@ -12,8 +12,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import traceback
+import ConfigParser
+import io
 import os.path
+import re
+import traceback
 from cinderclient import exceptions as cinder_exceptions
 from eventlet import greenthread
 from novaclient import exceptions as nova_exceptions
@@ -131,11 +134,40 @@ class ConfigurationMixin(object):
         config.render()
         return config
 
+    def _remove_commented_lines(self, config_str):
+        ret = []
+        for line in config_str.splitlines():
+            if line.startswith('#') or line.startswith('!') or line.startswith(':'):
+                continue
+            else:
+                ret.append(line)
+        rendered = "\n".join(ret)
+        LOG.debug("%s" % rendered)
+        return rendered
+
+
+    def _render_config_dict(self, service_type, flavor):
+        config = template.SingleInstanceConfigTemplate(
+            service_type, flavor)
+        config.render()
+        LOG.debug("config default template rendered: %s" % config.config_contents)
+
+        cfg = ConfigParser.ConfigParser(allow_no_value=True)
+        # convert unicode to ascii because config parse was not happy
+        cfgstr = str(config.config_contents)
+
+        good_cfg = self._remove_commented_lines(cfgstr)
+
+        cfg.readfp(io.BytesIO(str(good_cfg)))
+        ret = cfg.items("mysqld")
+        LOG.debug("returning the default template dict of mysqld section: %s" % ret)
+        return ret
+
 
 class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
     def create_instance(self, flavor, image_id, databases, users,
                         service_type, volume_size, security_groups,
-                        backup_id, availability_zone):
+                        backup_id, availability_zone, overrides):
         if use_heat:
             server, volume_info = self._create_server_volume_heat(
                 flavor,
@@ -173,7 +205,7 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
         if server:
             self._guest_prepare(server, flavor['ram'], volume_info,
                                 databases, users, backup_id,
-                                config.config_contents)
+                                config.config_contents, overrides)
 
         if not self.db_info.task_status.is_error:
             self.update_db(task_status=inst_models.InstanceTasks.NONE)
@@ -417,14 +449,15 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
 
     def _guest_prepare(self, server, flavor_ram, volume_info,
                        databases, users, backup_id=None,
-                       config_contents=None):
+                       config_contents=None, overrides=None):
         LOG.info("Entering guest_prepare.")
         # Now wait for the response from the create to do additional work
         self.guest.prepare(flavor_ram, databases, users,
                            device_path=volume_info['device_path'],
                            mount_point=volume_info['mount_point'],
                            backup_id=backup_id,
-                           config_contents=config_contents)
+                           config_contents=config_contents,
+                           overrides=overrides)
 
     def _create_dns_entry(self):
         LOG.debug("%s: Creating dns entry for instance: %s" %
@@ -654,6 +687,54 @@ class BuiltInstanceTasks(BuiltInstance, NotifyMixin, ConfigurationMixin):
         finally:
             LOG.debug("Restarting FINALLY  %s " % self.id)
             self.update_db(task_status=inst_models.InstanceTasks.NONE)
+
+    def update_overrides(self, overrides):
+        LOG.debug("Updating configuration overrides on instance %s" % self.id)
+        try:
+            self.guest.update_overrides(overrides)
+            LOG.debug("Configuration override update successful.")
+        except GuestError:
+            LOG.error("Failed to update configuration overrides.")
+
+    def unassign_configuration(self, flavor, configuration_id):
+        LOG.debug("Unassigning the configuration id (%s) to the instance %s"
+                  % (self.configuration.id, self.id))
+
+        def _find_item(items, item_name):
+            # find the item in the list
+            for i in items:
+                if i[0] == item_name:
+                    return i
+            return None
+        def _convert_value(value):
+            # size = value[-1:]
+            # digits = value[:-1]
+            # split the value and the size e.g. 512M=['512','M']
+            pattern = re.compile('(\d+)(\w+)')
+            split = pattern.findall(value)
+            if len(split) < 2:
+                return value
+            digits, size = split
+            if size=='K':
+                ret = int(digits)*1024
+            if size=='M':
+                ret = int(digits)*1024**2
+            if size=='G':
+                ret = int(digits)*1024**3
+            return str(ret)
+
+        default_config = self._render_config_dict(self.service_type, flavor)
+        LOG.debug("default mysqld section: %s" % default_config)
+
+        overrides = {}
+        for item in self.configuration.items:
+            LOG.debug("finding item(%s)" % item)
+            default_item = _find_item(default_config, item.configuration_key)
+            overrides[item.configuration_key] = _convert_value(default_item[1])
+        LOG.debug("setting the default variables in dict: %s" % overrides)
+        self.update_overrides(overrides, remove=True)
+        # self.update_overrides({})
+
 
     def _refresh_compute_server_info(self):
         """Refreshes the compute server field."""

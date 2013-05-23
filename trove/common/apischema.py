@@ -17,6 +17,13 @@ from trove.common import cfg
 
 CONF = cfg.CONF
 
+configuration_ref = {
+    "type": "string",
+    "minLength": 8,
+    "pattern": 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]'
+               '|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+}
+
 flavorref = {
     'oneOf': [
         {
@@ -179,6 +186,7 @@ instance = {
                 "additionalProperties": True,
                 "properties": {
                     "name": non_empty_string,
+                    "configuration_ref": configuration_ref,
                     "flavorRef": flavorref,
                     "volume": volume,
                     "databases": databases_def,

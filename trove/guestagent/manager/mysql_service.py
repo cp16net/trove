@@ -33,6 +33,8 @@ UUID = False
 
 TMP_MYCNF = "/tmp/my.cnf.tmp"
 MYSQL_BASE_DIR = "/var/lib/mysql"
+MYCNF_OVERRIDES = "/etc/mysql/conf.d/overrides.cnf"
+MYCNF_OVERRIDES_TMP = "/tmp/overrides.cnf.tmp"
 
 CONF = cfg.CONF
 INCLUDE_MARKER_OPERATORS = {
@@ -651,7 +653,7 @@ class MySqlApp(object):
     def complete_install_or_restart(self):
         self.status.end_install_or_restart()
 
-    def secure(self, config_contents):
+    def secure(self, config_contents, overrides):
         LOG.info(_("Generating admin password..."))
         admin_password = generate_random_password()
 
@@ -662,7 +664,7 @@ class MySqlApp(object):
             self._create_admin_user(client, admin_password)
 
         self.stop_db()
-        self._write_mycnf(admin_password, config_contents)
+        self._write_mycnf(admin_password, config_contents, overrides)
         self.start_mysql()
 
         LOG.info(_("Dbaas secure complete."))
@@ -753,6 +755,36 @@ class MySqlApp(object):
         finally:
             self.status.end_install_or_restart()
 
+    def update_overrides(self, overrides, remove=False):
+        """
+        This function will either update or remove the MySQL overrides.cnf file
+        If an empty dictionary is provided for overrides, the function will
+        remove the overrides file.
+
+        When updating, the agent will also attempt to dynamically set
+        the corresponding global variables.
+        :param overrides:
+        :return:
+        """
+
+        if overrides:
+            LOG.debug("writing new overrides.cnf config file")
+            self._write_config_overrides(overrides)
+
+            with LocalSqlClient(get_engine()) as client:
+                LOG.debug("updating overrides values in running daemon")
+                for k, v in overrides.iteritems():
+                    q = query.SetServerVariable(key=k, value=v)
+                    t = text(str(q))
+                    try:
+                        client.execute(t)
+                    except exc.OperationalError as oe:
+                        LOG.exception("Unable to set %s with value %s" % (k, v))
+                        LOG.exception(oe)
+        if remove:
+            LOG.debug("removing overrides.cnf config file")
+            self._remove_overrides()
+
     def _replace_mycnf_with_template(self, template_path, original_path):
         LOG.debug("replacing the mycnf with template")
         LOG.debug("template_path(%s) original_path(%s)"
@@ -801,7 +833,7 @@ class MySqlApp(object):
                 if "No such file or directory" not in str(pe):
                     raise
 
-    def _write_mycnf(self, admin_password, config_contents):
+    def _write_mycnf(self, admin_password, config_contents, overrides):
         """
         Install the set of mysql my.cnf templates.
         Update the os_admin user and password to the my.cnf
@@ -823,6 +855,52 @@ class MySqlApp(object):
                                    system.MYSQL_CONFIG)
 
         self.wipe_ib_logfiles()
+
+        # write configuration file overrides
+        if overrides:
+            self._write_config_overrides(overrides)
+
+    def _write_config_overrides(self, overrideValues):
+        LOG.info(_("Writing new temp overrides.cnf file."))
+
+        overrides = open(MYCNF_OVERRIDES_TMP, 'w')
+
+        # write the header of the overrides file
+        overrides.write("[mysqld]\n")
+
+        # overrides that have empty values should be expressed as-is and
+        # with no equals + value parameter.
+        for k, v in overrideValues.iteritems():
+            if v is True:
+                overrides.write("%s = 1\n" % k)
+            elif v is False:
+                overrides.write("%s = 0\n" % k)
+            elif v == "":
+                overrides.write("%s\n" % k)
+            else:
+                overrides.write("%s = %s\n" % (k, v))
+
+        overrides.close()
+        LOG.info(_("Moving overrides.cnf into correct location."))
+        utils.execute_with_timeout("sudo", "mv", MYCNF_OVERRIDES_TMP,
+                                   MYCNF_OVERRIDES)
+
+        LOG.info(_("Setting permissions on overrides.cnf"))
+        utils.execute_with_timeout("sudo", "chmod", "0711", MYCNF_OVERRIDES)
+
+    def _remove_overrides(self):
+        LOG.info(_("Removing overrides configuration file"))
+
+        try:
+            utils.execute_with_timeout("sudo", "rm", MYCNF_OVERRIDES)
+        except exception.ProcessExecutionError as pe:
+            LOG.error("Could not delete overrides configuration.")
+            LOG.error(pe)
+
+            # if the overrides file simply doesn't exist, we will proceed
+            # anyway.
+            if "No such file or directory" not in str(pe):
+                raise
 
     def start_mysql(self, update_db=False):
         LOG.info(_("Starting mysql..."))
@@ -865,13 +943,15 @@ class MySqlApp(object):
                         "MySQL state == %s!") % self.status)
             raise RuntimeError("MySQL not stopped.")
         LOG.info(_("Initiating config."))
-        self._write_mycnf(None, config_contents)
+        # TODO(pdmars): update this with overrides information?
+        self._write_mycnf(None, config_contents, None)
         self.start_mysql(True)
 
     def reset_configuration(self, configuration):
         config_contents = configuration['config_contents']
         LOG.info(_("Resetting configuration"))
-        self._write_mycnf(None, config_contents)
+        # TODO(pdmars): update this with overrides information?
+        self._write_mycnf(None, config_contents, None)
 
     def is_installed(self):
         #(cp16net) could raise an exception, does it need to be handled here?

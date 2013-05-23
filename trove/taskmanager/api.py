@@ -108,11 +108,27 @@ class API(ManagerAPI):
     def create_instance(self, instance_id, name, flavor,
                         image_id, databases, users, service_type,
                         volume_size, security_groups, backup_id=None,
-                        availability_zone=None):
+                        availability_zone=None, overrides=None):
         LOG.debug("Making async call to create instance %s " % instance_id)
         self._cast("create_instance", instance_id=instance_id, name=name,
                    flavor=self._transform_obj(flavor), image_id=image_id,
                    databases=databases, users=users,
                    service_type=service_type, volume_size=volume_size,
                    security_groups=security_groups, backup_id=backup_id,
-                   availability_zone=availability_zone)
+                   availability_zone=availability_zone, overrides=overrides)
+
+    def update_overrides(self, instance_id, overrides=None):
+        LOG.debug("Making async call to update configuration overrides for "
+                  "instance %s" % instance_id)
+
+        self._cast("update_overrides", instance_id=instance_id,
+                   overrides=overrides)
+
+    def unassign_configuration(self, instance_id, flavor, configuration_id):
+        LOG.debug("Making async call to unassign configuration for "
+                  "instance %s" % instance_id)
+
+        self._cast("unassign_configuration", instance_id=instance_id,
+                   flavor=self._transform_obj(flavor),
+                   configuration_id=configuration_id)
+
