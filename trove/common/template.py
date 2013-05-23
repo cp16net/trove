@@ -12,6 +12,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import ConfigParser
+import io
 import jinja2
 
 ENV = jinja2.Environment(loader=jinja2.ChoiceLoader([
@@ -23,7 +25,8 @@ ENV = jinja2.Environment(loader=jinja2.ChoiceLoader([
 class SingleInstanceConfigTemplate(object):
     """ This class selects a single configuration file by database type for
     rendering on the guest """
-    def __init__(self, service_type, flavor_dict, instance_id):
+    def __init__(self, service_type, flavor_dict, instance_id,
+                 overrides=False):
         """ Constructor
 
         :param service_type: The database type.
@@ -35,11 +38,14 @@ class SingleInstanceConfigTemplate(object):
 
         """
         self.flavor_dict = flavor_dict
-        template_filename = "%s.config.template" % service_type
+        if overrides:
+            template_filename = "%s.override.config.template" % service_type
+        else:
+            template_filename = "%s.config.template" % service_type
         self.template = ENV.get_template(template_filename)
         self.instance_id = instance_id
 
-    def render(self):
+    def render(self, **kwargs):
         """ Renders the jinja template
 
         :returns: str -- The rendered configuration file
@@ -47,8 +53,33 @@ class SingleInstanceConfigTemplate(object):
         """
         server_id = self._calculate_unique_id()
         self.config_contents = self.template.render(
-            flavor=self.flavor_dict, server_id=server_id)
+            flavor=self.flavor_dict, server_id=server_id, **kwargs)
         return self.config_contents
+
+    def render_dict(self):
+        config = self.render()
+        cfg = ConfigParser.ConfigParser(allow_no_value=True)
+        # convert unicode to ascii because config parse was not happy
+        cfgstr = str(config)
+
+        good_cfg = self._remove_commented_lines(cfgstr)
+
+        cfg.readfp(io.BytesIO(str(good_cfg)))
+        return cfg.items("mysqld")
+
+    def _remove_commented_lines(self, config_str):
+        ret = []
+        for line in config_str.splitlines():
+            if line.startswith('#'):
+                continue
+            elif line.startswith('!'):
+                continue
+            elif line.startswith(':'):
+                continue
+            else:
+                ret.append(line)
+        rendered = "\n".join(ret)
+        return rendered
 
     def _calculate_unique_id(self):
         """

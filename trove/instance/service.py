@@ -20,12 +20,16 @@ import webob.exc
 from trove.common import cfg
 from trove.common import exception
 from trove.common import pagination
+from trove.common import template
 from trove.common import utils
 from trove.common import wsgi
+from trove.common.exception import ModelNotFoundError
+from trove.configuration.models import Configuration
 from trove.extensions.mysql.common import populate_validated_databases
 from trove.extensions.mysql.common import populate_users
 from trove.instance import models, views
 from trove.backup.models import Backup as backup_model
+from trove.configuration.models import Configuration as cfg_model
 from trove.backup import views as backup_views
 from trove.openstack.common import log as logging
 from trove.openstack.common.gettextutils import _
@@ -186,6 +190,22 @@ class InstanceController(wsgi.Controller):
         name = body['instance']['name']
         flavor_ref = body['instance']['flavorRef']
         flavor_id = utils.get_id_from_href(flavor_ref)
+
+        if 'configuration_ref' in body['instance']:
+            configuration_ref = body['instance']['configuration_ref']
+            configuration_id = utils.get_id_from_href(configuration_ref)
+
+            # ensure a valid configuration has been passed in and that it
+            # belongs to the user requesting it.
+            try:
+                Configuration.load(context, configuration_id)
+            except ModelNotFoundError:
+                raise exception.NotFound(
+                    message='Configuration group %s could not be found'
+                    % configuration_id)
+        else:
+            configuration_id = None
+
         databases = populate_validated_databases(
             body['instance'].get('databases', []))
         database_names = [database.get('_name', '') for database in databases]
@@ -215,7 +235,132 @@ class InstanceController(wsgi.Controller):
         instance = models.Instance.create(context, name, flavor_id,
                                           image_id, databases, users,
                                           service_type, volume_size,
-                                          backup_id, availability_zone)
+                                          backup_id, availability_zone,
+                                          configuration_id)
 
         view = views.InstanceDetailView(instance, req=req)
         return wsgi.Result(view.data(), 200)
+
+    def update(self, req, id, body, tenant_id):
+        LOG.info(_("Updating instance for tenant id %s" % tenant_id))
+        LOG.info(_("req: %s" % req))
+        LOG.info(_("body: %s" % body))
+        context = req.environ[wsgi.CONTEXT_KEY]
+
+        instance = models.Instance.load(context, id)
+
+        # update name, if supplied
+        if 'name' in body["instance"]:
+            models.Instance.update_db(instance, name=body["instance"]["name"])
+
+        # if configuration_ref is set, then we will update the instance to use
+        # the new configuration.  If configuration_ref is empty, we want to
+        # disassociate the instance from the configuration group and remove the
+        # active overrides file.
+        if 'configuration_ref' in body["instance"]:
+            # Assigning configuration
+            configuration_ref = body["instance"]["configuration_ref"]
+
+            if configuration_ref:
+                configuration_id = utils.get_id_from_href(
+                    body["instance"]["configuration_ref"])
+
+                configuration = models.Configuration.load(
+                    context, configuration_id)
+
+                overrides = {}
+                for i in configuration.items:
+                    overrides[i.configuration_key] = i.configuration_value
+
+                LOG.info(overrides)
+
+                instance.update_overrides(overrides)
+                models.Instance.update_db(instance,
+                                          configuration_id=configuration_id)
+            else:
+                instance.update_overrides({})
+                models.Instance.update_db(instance, configuration_id=None)
+        else:
+            # Unassigning configuration
+            LOG.debug("instance dict: %r" % instance.__dict__)
+            LOG.debug("removing the configuration form instance")
+            if instance.configuration.id:
+                instance.unassign_configuration()
+            else:
+                LOG.debug("no configuration found on instance skipping.")
+
+        return wsgi.Result(None, 202)
+
+    def configuration(self, req, tenant_id, id):
+        LOG.debug("getting default configuration for the instance(%s)" % id)
+        context = req.environ[wsgi.CONTEXT_KEY]
+        instance = models.Instance.load(context, id)
+        LOG.debug("server: %s" % instance)
+        flavor = instance.get_flavor()
+        LOG.debug("flavor: %s" % flavor)
+        config = template.SingleInstanceConfigTemplate(
+            instance.service_type, flavor, id)
+
+        ret = config.render_dict()
+        LOG.debug("default config for instance is: %s" % ret)
+        return wsgi.Result(views.DefaultConfigurationView(
+                           ret).data(), 200)
+
+    @staticmethod
+    def _validate_body_not_empty(body):
+        """Check that the body is not empty"""
+        if not body:
+            msg = "The request contains an empty body"
+            raise exception.TroveError(msg)
+
+    @staticmethod
+    def _validate_resize_volume(volume):
+        """
+        We are going to check that volume resizing data is present.
+        """
+        if 'size' not in volume:
+            raise exception.BadRequest(
+                "Missing 'size' property of 'volume' in request body.")
+        InstanceController._validate_volume_size(volume['size'])
+
+    @staticmethod
+    def _validate_volume_size(size):
+        """Validate the various possible errors for volume size"""
+        try:
+            volume_size = float(size)
+        except (ValueError, TypeError) as err:
+            LOG.error(err)
+            msg = ("Required element/key - instance volume 'size' was not "
+                   "specified as a number (value was %s)." % size)
+            raise exception.TroveError(msg)
+        if int(volume_size) != volume_size or int(volume_size) < 1:
+            msg = ("Volume 'size' needs to be a positive "
+                   "integer value, %s cannot be accepted."
+                   % volume_size)
+            raise exception.TroveError(msg)
+
+    @staticmethod
+    def _validate(body):
+        """Validate that the request has all the required parameters"""
+        InstanceController._validate_body_not_empty(body)
+
+        try:
+            body['instance']
+            body['instance']['flavorRef']
+            name = body['instance'].get('name', '').strip()
+            if not name:
+                raise exception.MissingKey(key='name')
+            if CONF.trove_volume_support:
+                if body['instance'].get('volume', None):
+                    if body['instance']['volume'].get('size', None):
+                        volume_size = body['instance']['volume']['size']
+                        InstanceController._validate_volume_size(volume_size)
+                    else:
+                        raise exception.MissingKey(key="size")
+                else:
+                    raise exception.MissingKey(key="volume")
+
+        except KeyError as e:
+            LOG.error(_("Create Instance Required field(s) - %s") % e)
+            raise exception.TroveError("Required element/key - %s "
+                                       "was not specified" % e)

@@ -12,8 +12,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import traceback
 import os.path
+import re
+import traceback
 from cinderclient import exceptions as cinder_exceptions
 from eventlet import greenthread
 from novaclient import exceptions as nova_exceptions
@@ -138,11 +139,25 @@ class ConfigurationMixin(object):
         config.render()
         return config
 
+    def _render_override_config(self, service_type, flavor, instance_id,
+                                overrides=None):
+        config = template.SingleInstanceConfigTemplate(
+            service_type, flavor, instance_id, overrides=True)
+        config.render(overrides=overrides)
+        return config
+
+    def _render_config_dict(self, service_type, flavor):
+        config = template.SingleInstanceConfigTemplate(
+            service_type, flavor)
+        ret = config.render_dict()
+        LOG.debug("the default template dict of mysqld section: %s" % ret)
+        return ret
+
 
 class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
     def create_instance(self, flavor, image_id, databases, users,
                         service_type, volume_size, backup_id,
-                        availability_zone, root_password):
+                        availability_zone, root_password, overrides):
 
         security_groups = None
         if CONF.trove_security_groups_support:
@@ -183,11 +198,15 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
                 availability_zone)
 
         config = self._render_config(service_type, flavor, self.id)
+        config_overrides = self._render_override_config(service_type, None,
+                                                        self.id,
+                                                        overrides=overrides)
 
         if server:
             self._guest_prepare(server, flavor['ram'], volume_info,
                                 databases, users, backup_id,
-                                config.config_contents, root_password)
+                                config.config_contents, root_password,
+                                config_overrides.config_contents)
 
         if not self.db_info.task_status.is_error:
             self.update_db(task_status=inst_models.InstanceTasks.NONE)
@@ -475,7 +494,8 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
 
     def _guest_prepare(self, server, flavor_ram, volume_info,
                        databases, users, backup_id=None,
-                       config_contents=None, root_password=None):
+                       config_contents=None, root_password=None,
+                       overrides=None):
         LOG.info("Entering guest_prepare.")
         # Now wait for the response from the create to do additional work
         self.guest.prepare(flavor_ram, databases, users,
@@ -483,7 +503,8 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
                            mount_point=volume_info['mount_point'],
                            backup_id=backup_id,
                            config_contents=config_contents,
-                           root_password=root_password)
+                           root_password=root_password,
+                           overrides=overrides)
 
     def _create_dns_entry(self):
         LOG.debug("%s: Creating dns entry for instance: %s" %
@@ -727,6 +748,85 @@ class BuiltInstanceTasks(BuiltInstance, NotifyMixin, ConfigurationMixin):
         finally:
             LOG.debug("Restarting FINALLY  %s " % self.id)
             self.update_db(task_status=inst_models.InstanceTasks.NONE)
+
+    def update_overrides(self, overrides):
+        LOG.debug("Updating configuration overrides on instance %s" % self.id)
+
+        def _get_item(key, dictList):
+            for item in dictList:
+                if key == item['name']:
+                    return item
+
+        def _do_configs_require_restart(overrides):
+            rules = cfg.get_validation_rules()
+            for key in overrides.iterkeys():
+                rule = _get_item(str(key), rules['configuration-parameters'])
+                LOG.debug("checking the rule: %s" % rule)
+                if not rule['dynamic']:
+                    return True
+            return False
+        LOG.debug("overrides: %s" % overrides)
+        need_restart = _do_configs_require_restart(overrides)
+        LOG.debug("do we need a restart?: %s" % need_restart)
+        if need_restart:
+            status = inst_models.InstanceTasks.RESTART_REQUIRED
+            self.update_db(task_status=status)
+
+        config_overrides = self._render_override_config(self.service_type,
+                                                        None,
+                                                        self.id,
+                                                        overrides=overrides)
+        try:
+            self.guest.update_overrides(config_overrides.config_contents)
+            if CONF.apply_dynamic_configuration:
+                self.guest.apply_overrides(overrides)
+            LOG.debug("Configuration overrides update successful.")
+        except GuestError:
+            LOG.error("Failed to update configuration overrides.")
+
+    def unassign_configuration(self, flavor, configuration_id):
+        LOG.debug("Unassigning the configuration id (%s) to the instance %s"
+                  % (self.configuration.id, self.id))
+
+        def _find_item(items, item_name):
+            # find the item in the list
+            for i in items:
+                if i[0] == item_name:
+                    return i
+            return None
+
+        def _convert_value(value):
+            # split the value and the size e.g. 512M=['512','M']
+            pattern = re.compile('(\d+)(\w+)')
+            split = pattern.findall(value)
+            if len(split) < 2:
+                return value
+            digits, size = split
+            if size == 'K':
+                ret = int(digits) * 1024
+            if size == 'M':
+                ret = int(digits) * 1024 ** 2
+            if size == 'G':
+                ret = int(digits) * 1024 ** 3
+            return str(ret)
+
+        default_config = self._render_config_dict(self.service_type, flavor)
+        LOG.debug("default mysqld section: %s" % default_config)
+
+        overrides = {}
+        for item in self.configuration.items:
+            LOG.debug("finding item(%s)" % item)
+            key, val = _find_item(default_config, item.configuration_key)
+            overrides[item.configuration_key] = _convert_value(val)
+        LOG.debug("setting the default variables in dict: %s" % overrides)
+
+        try:
+            self.guest.remove_overrides()
+            if CONF.apply_dynamic_configuration:
+                self.guest.apply_overrides(overrides)
+            LOG.debug("Configuration overrides removal successful.")
+        except GuestError:
+            LOG.error("Failed to remove configuration overrides.")
 
     def _refresh_compute_server_info(self):
         """Refreshes the compute server field."""

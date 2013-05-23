@@ -229,6 +229,7 @@ def iso_time(time_string):
 from trove.common.utils import poll_until
 
 
+#TODO(cp16net): DO NOT USE needs to be removed
 def mysql_connection():
     cls = CONFIG.get('mysql_connection',
                      "local.MySqlConnection")
