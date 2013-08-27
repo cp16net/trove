@@ -53,6 +53,8 @@ def map(engine, models):
     orm.mapper(models['security_group_instance_association'],
                Table('security_group_instance_associations', meta,
                      autoload=True))
+    orm.mapper(models['scheduled_tasks'],
+               Table('scheduled_tasks', meta, autoload=True))
 
 
 def mapping_exists(model):
