@@ -777,6 +777,9 @@ class MySqlApp(object):
                         LOG.exception("Unable to set %s with value %s" % (k, v))
                         LOG.exception(oe)
         else:
+            #read the list in the overrides config file
+            #lookup the list in the my.cnf key,values
+            #set the defaults for the dynamic ones
             LOG.debug("removing overrides.cnf config file")
             self._remove_overrides()
 

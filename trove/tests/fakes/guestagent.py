@@ -37,6 +37,7 @@ class FakeGuest(object):
         self.version = 1
         self.event_spawn = get_event_spawer()
         self.grants = {}
+        self.overrides = {}
 
         # Our default admin user.
         self._create_user({
@@ -219,6 +220,7 @@ class FakeGuest(object):
         instance_name = DBInstance.find_by(id=self.id).name
         self.create_user(users)
         self.create_database(databases)
+        self.overrides = overrides or {}
 
         def update_db():
             status = InstanceServiceStatus.find_by(instance_id=self.id)
@@ -309,9 +311,7 @@ class FakeGuest(object):
         self.event_spawn(1.0, finish_create_backup)
 
     def update_overrides(self, overrides):
-        # There is nothing to do here, this just involves writing or deleting
-        # a mysql overrides configuration file
-        pass
+        self.overrides = overrides
 
 def get_or_create(id):
     if id not in DB:

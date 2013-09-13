@@ -189,9 +189,9 @@ class InstanceController(wsgi.Controller):
         flavor_ref = body['instance']['flavorRef']
         flavor_id = utils.get_id_from_href(flavor_ref)
 
-        if 'configurationRef' in body['instance']:
-            configurationRef = body['instance']['configurationRef']
-            configuration_id = utils.get_id_from_href(configurationRef)
+        if 'configuration_ref' in body['instance']:
+            configuration_ref = body['instance']['configuration_ref']
+            configuration_id = utils.get_id_from_href(configuration_ref)
 
             # ensure a valid configuration has been passed in and that it
             # belongs to the user requesting it.
@@ -244,16 +244,16 @@ class InstanceController(wsgi.Controller):
         if 'name' in body["instance"]:
             models.Instance.update_db(instance, name=body["instance"]["name"])
 
-        # if configurationRef is set, then we will update the instance to use
-        # the new configuration.  If configurationRef is empty, we want to
+        # if configuration_ref is set, then we will update the instance to use
+        # the new configuration.  If configuration_ref is empty, we want to
         # disassociate the instance from the configuration group and remove the
         # active overrides file.
-        if 'configurationRef' in body["instance"]:
-            configurationRef = body["instance"]["configurationRef"]
+        if 'configuration_ref' in body["instance"]:
+            configuration_ref = body["instance"]["configuration_ref"]
 
-            if configurationRef:
+            if configuration_ref:
                 configuration_id = utils.get_id_from_href(
-                    body["instance"]["configurationRef"])
+                    body["instance"]["configuration_ref"])
 
                 configuration = models.Configuration.load(
                     context, configuration_id)

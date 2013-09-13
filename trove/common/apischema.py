@@ -17,7 +17,7 @@ from trove.common import cfg
 
 CONF = cfg.CONF
 
-configurationref = {
+configuration_ref = {
     "type": "string",
     "minLength": 8,
     "pattern": 'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]'
@@ -186,7 +186,7 @@ instance = {
                 "additionalProperties": False,
                 "properties": {
                     "name": non_empty_string,
-                    "configurationRef": configurationref,
+                    "configuration_ref": configuration_ref,
                     "flavorRef": flavorref,
                     "volume": volume,
                     "databases": databases_def,

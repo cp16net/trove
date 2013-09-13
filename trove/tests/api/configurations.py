@@ -97,6 +97,7 @@ class CreateConfigurations(object):
     @test
     def test_valid_configurations_create(self):
         values = '{"connect_timeout": 120, "key_buffer_size": 1048576}'
+        expected_values = json.loads(values)
         result = instance_info.dbaas.configurations.create(CONFIG_NAME,
                                                            values,
                                                            CONFIG_DESC)
@@ -106,6 +107,7 @@ class CreateConfigurations(object):
         configuration_info = result
         assert_equal(configuration_info.name, CONFIG_NAME)
         assert_equal(configuration_info.description, CONFIG_DESC)
+        assert_equal(configuration_info.values, expected_values)
 
 
 @test(depends_on=[CreateConfigurations], groups=[GROUP])

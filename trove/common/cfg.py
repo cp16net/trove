@@ -194,8 +194,6 @@ common_opts = [
                help="Path to guestagent config file"),
     cfg.StrOpt('validation_rules',
                default="/etc/trove/validation-rules.json"),
-    cfg.StrOpt('validation_rule_file',
-               default="/etc/trove/validation-rules.json"),
 ]
 
 
@@ -209,7 +207,7 @@ cfg.validation_rules = dict()
 def get_validation_rules():
 
     if not cfg.validation_rules:
-        validation_config = open(CONF.validation_rule_file)
+        validation_config = open(CONF.validation_rules)
         rules = json.load(validation_config)
         validation_config.close()
 
