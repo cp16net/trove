@@ -103,6 +103,24 @@ class CreateConfigurations(object):
             assert_true(expected_config_item in config_params_keys)
 
     @test
+    def test_expected_get_configuration_parameter(self):
+        param = 'key_buffer_size'
+        instance_info.dbaas.configurations.get_parameter(param)
+        resp, body = instance_info.dbaas.client.last_response
+        attrcheck = AttrCheck()
+        config_parameter_dict = json.loads(body)
+        attrcheck.attrs_exist(config_parameter_dict, param,
+                              msg="Get Configuration parameter")
+        config_param_list = config_parameter_dict[param]
+        config_param_keys = []
+        print(config_param_list)
+        for key in config_param_list.keys():
+            config_param_keys.append(key)
+        expected_config_params = ['dynamic', 'max', 'min', 'type']
+        for expected_config_item in expected_config_params:
+            assert_true(expected_config_item in config_param_keys)
+
+    @test
     def test_configurations_create_invalid_values(self):
         """test create configurations with invalid values"""
         values = '{"this_is_invalid": 123}'
@@ -207,6 +225,15 @@ class ListConfigurations(object):
         assert_equal(configuration_info.id, result.id)
         assert_equal(configuration_info.name, result.name)
         assert_equal(configuration_info.description, result.description)
+        conf_instances = result.instances
+        # this is for debuging
+        print(conf_instances)
+        print(conf_instances[0])
+        print(conf_instances[0]['id'])
+        print(conf_instances[0]['name'])
+        assert_equal(conf_instances[0]['id'], instance_info.id)
+        assert_equal(conf_instances[0]['name'], instance_info.name)
+
 
         # Test to make sure that another user is not able to GET this config
         reqs = Requirements(is_admin=False)

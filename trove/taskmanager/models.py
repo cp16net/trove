@@ -184,7 +184,7 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
             self._log_and_raise(e, msg, err)
 
         config = self._render_config(service_type, flavor, self.id)
-        config_overrides = self._render_override_config(service_type, flavor,
+        config_overrides = self._render_override_config(service_type, None,
                                                         self.id,
                                                         overrides=overrides)
 
@@ -678,7 +678,7 @@ class BuiltInstanceTasks(BuiltInstance, NotifyMixin, ConfigurationMixin):
     def update_overrides(self, overrides):
         LOG.debug("Updating configuration overrides on instance %s" % self.id)
         config_overrides = self._render_override_config(self.service_type,
-                                                        self.flavor,
+                                                        None,
                                                         self.id,
                                                         overrides=overrides)
         try:
