@@ -20,9 +20,7 @@ import json
 import troveclient
 from proboscis import SkipTest
 from proboscis import test
-from proboscis.asserts import assert_equal
-from proboscis.asserts import assert_raises
-from proboscis.asserts import assert_true
+from proboscis.asserts import *
 from proboscis.decorators import time_out
 from trove.tests.api.instances import assert_unprocessable
 from trove.tests.api.instances import instance_info
@@ -44,10 +42,39 @@ CONFIG_DESC = "configuration description"
 configuration_info = None
 configuration_href = None
 configuration_instance_id = None
+sql_variables = [
+    'key_buffer_size',
+    'connect_timeout',
+    'join_buffer_size',
+]
 
 def execute_query(host, user_name, password, query):
     with create_mysql_connection(host, user_name, password) as db:
-        return db.query(query)
+        result = db.execute(query)
+        return result
+    assert_true(False, "something went wrong in the sql connection")
+
+@test(depends_on_classes=[WaitForGuestInstallationToFinish], groups=["donut"])
+class TestGetConfigurationDetails(object):
+
+    @test
+    @time_out(10)
+    def test_get_configuration_details_from_instance(self):
+        if CONFIG.fake_mode:
+            raise SkipTest("configuration from sql does not work in fake mode")
+        # need instance connection details
+        host = instance_info.get_address()
+        for user in instance_info.users:
+            username = user['name']
+            password = user['password']
+            concat_variables = "','".join(sql_variables)
+            query = ("show variables where Variable_name "
+                     "in ('%s');" % concat_variables)
+            result = execute_query(host, username, password, query)
+        print(result)
+        assert_true(len(result)==len(sql_variables))
+        assert_true(False)
+
 
 
 # create configurations tests
@@ -114,20 +141,20 @@ class CreateConfigurations(object):
         assert_equal(configuration_info.description, CONFIG_DESC)
         assert_equal(configuration_info.values, expected_values)
 
-    # @test(runs_after=[test_valid_configurations_create])
+    @test(runs_after=[test_valid_configurations_create])
     def test_appending_to_existing_configuration(self):
         values = '{"join_buffer_size": 1048576, "connect_timeout": 60}'
-        expected_values = json.loads(values)
+        # expected_values = json.loads(values)
         result = instance_info.dbaas.configurations.edit(configuration_info.id,
                                                          values)
         resp, body = instance_info.dbaas.client.last_response
         assert_equal(resp.status, 200)
-        global configuration_info
-        configuration_info = result
-        print(result)
-        assert_equal(configuration_info.name, CONFIG_NAME)
-        assert_equal(configuration_info.description, CONFIG_DESC)
-        assert_equal(configuration_info.values, expected_values)
+        # global configuration_info
+        # configuration_info = result
+        # print(result)
+        # assert_equal(configuration_info.name, CONFIG_NAME)
+        # assert_equal(configuration_info.description, CONFIG_DESC)
+        # assert_equal(configuration_info.values, expected_values)
 
 
 @test(depends_on=[CreateConfigurations], groups=[GROUP])
@@ -188,6 +215,11 @@ class ListConfigurations(object):
         other_client = create_dbaas_client(other_user)
         assert_raises(exceptions.NotFound, other_client.configurations.get,
                       configuration_info.id)
+
+    @test
+    def test_get_default_configuration_on_instance(self):
+        result = instance_info.dbaas.instances.configuration(instance_info.id)
+        assert_not_equal(None, result.configuration)
 
 
 @test(depends_on=[ListConfigurations], groups=[GROUP])
@@ -273,6 +305,15 @@ class DeleteConfigurations(object):
         poll_until(instance_is_gone)
         assert_raises(exceptions.NotFound, instance_info.dbaas.instances.get,
                       configuration_instance_id)
+
+    @test(depends_on=[test_delete_configuration_instance])
+    def test_no_instances_on_configuration(self):
+        result = instance_info.dbaas.configurations.get(configuration_info.id)
+        assert_equal(configuration_info.id, result.id)
+        assert_equal(configuration_info.name, result.name)
+        assert_equal(configuration_info.description, result.description)
+        assert_equal(0, len(result.instances))
+
 
     @test(depends_on=[test_unassign_configuration_from_instances])
     def test_delete_unassigned_configuration(self):

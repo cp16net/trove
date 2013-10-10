@@ -348,7 +348,8 @@ class BaseInstance(SimpleInstance):
             LOG.debug(_("  ... deleting compute id = %s") %
                       self.db_info.compute_instance_id)
             LOG.debug(_(" ... setting status to DELETING."))
-            self.update_db(task_status=InstanceTasks.DELETING)
+            self.update_db(task_status=InstanceTasks.DELETING,
+                           configuration_id=None)
             task_api.API(self.context).delete_instance(self.id)
 
         deltas = {'instances': -1}
@@ -522,6 +523,10 @@ class Instance(BuiltInstance):
         return run_with_quotas(context.tenant,
                                deltas,
                                _create_resources)
+
+    def get_flavor(self):
+        client = create_nova_client(self.context)
+        return client.flavors.get(self.flavor_id)
 
     def resize_flavor(self, new_flavor_id):
         self.validate_can_perform_action()
@@ -733,7 +738,8 @@ class DBInstance(dbmodels.DatabaseModelBase):
 
     _data_fields = ['name', 'created', 'compute_instance_id',
                     'task_id', 'task_description', 'task_start_time',
-                    'volume_id', 'deleted', 'tenant_id', 'service_type']
+                    'volume_id', 'deleted', 'tenant_id', 'service_type',
+                    'configuration_id']
 
     def __init__(self, task_status, **kwargs):
         kwargs["task_id"] = task_status.code

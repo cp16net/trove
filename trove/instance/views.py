@@ -134,3 +134,14 @@ class InstancesView(object):
     def data_for_instance(self, instance):
         view = InstanceView(instance, req=self.req)
         return view.data()['instance']
+
+
+class DefaultConfigurationView(object):
+    def __init__(self, config):
+        self.config = config
+
+    def data(self):
+        config_dict = {}
+        for cfg in self.config:
+            config_dict[cfg[0]] = cfg[1]
+        return {"instance": {"configuration": config_dict}}

@@ -15,6 +15,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from trove.openstack.common import log as logging
+
+LOG = logging.getLogger(__name__)
+
 
 class ConfigurationView(object):
 
@@ -58,6 +62,7 @@ class DetailedConfigurationView(object):
         instances_list = []
 
         for instance in self.configuration.instances:
+            LOG.debug("creating view: %r" % instance)
             instances_list.append(
                 {
                     "id": instance.id,
@@ -85,7 +90,7 @@ class DetailedConfigurationView(object):
                 "name": self.configuration.name,
                 "description": self.configuration.description,
                 "values": values,
-                "instances": instances_dict
+                "instances": instances_dict,
             }
 
         return {"configuration": configuration_dict}

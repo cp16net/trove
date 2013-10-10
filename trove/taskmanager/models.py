@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import ConfigParser
-import io
 import os.path
 import re
 import traceback
@@ -134,32 +132,17 @@ class ConfigurationMixin(object):
         config.render()
         return config
 
-    def _remove_commented_lines(self, config_str):
-        ret = []
-        for line in config_str.splitlines():
-            if line.startswith('#') or line.startswith('!') or line.startswith(':'):
-                continue
-            else:
-                ret.append(line)
-        rendered = "\n".join(ret)
-        LOG.debug("%s" % rendered)
-        return rendered
-
+    def _render_override_config(self, service_type, flavor, instance_id,
+                                overrides=None):
+        config = template.SingleInstanceConfigTemplate(
+            service_type, flavor, instance_id, overrides=True)
+        config.render(overrides=overrides)
+        return config
 
     def _render_config_dict(self, service_type, flavor):
         config = template.SingleInstanceConfigTemplate(
             service_type, flavor)
-        config.render()
-        LOG.debug("config default template rendered: %s" % config.config_contents)
-
-        cfg = ConfigParser.ConfigParser(allow_no_value=True)
-        # convert unicode to ascii because config parse was not happy
-        cfgstr = str(config.config_contents)
-
-        good_cfg = self._remove_commented_lines(cfgstr)
-
-        cfg.readfp(io.BytesIO(str(good_cfg)))
-        ret = cfg.items("mysqld")
+        ret = config.render_dict()
         LOG.debug("returning the default template dict of mysqld section: %s" % ret)
         return ret
 
@@ -201,11 +184,15 @@ class FreshInstanceTasks(FreshInstance, NotifyMixin, ConfigurationMixin):
             self._log_and_raise(e, msg, err)
 
         config = self._render_config(service_type, flavor, self.id)
+        config_overrides = self._render_override_config(service_type, flavor,
+                                                        self.id,
+                                                        overrides=overrides)
 
         if server:
             self._guest_prepare(server, flavor['ram'], volume_info,
                                 databases, users, backup_id,
-                                config.config_contents, overrides)
+                                config.config_contents,
+                                config_overrides.config_contents)
 
         if not self.db_info.task_status.is_error:
             self.update_db(task_status=inst_models.InstanceTasks.NONE)
@@ -690,8 +677,12 @@ class BuiltInstanceTasks(BuiltInstance, NotifyMixin, ConfigurationMixin):
 
     def update_overrides(self, overrides):
         LOG.debug("Updating configuration overrides on instance %s" % self.id)
+        config_overrides = self._render_override_config(self.service_type,
+                                                        self.flavor,
+                                                        self.id,
+                                                        overrides=overrides)
         try:
-            self.guest.update_overrides(overrides)
+            self.guest.update_overrides(config_overrides.config_contents)
             LOG.debug("Configuration override update successful.")
         except GuestError:
             LOG.error("Failed to update configuration overrides.")

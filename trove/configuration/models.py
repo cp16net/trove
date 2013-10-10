@@ -58,7 +58,7 @@ class Configuration(object):
     @staticmethod
     def load(context, id):
         config_infos = DBConfiguration.find_by(id=id, tenant_id=context.tenant)
-        # TODO(cp16net): Need to add pagination here...
+        # TODO(cp16net): Need to add pagination OR make this a separate call
         # limit = int(context.limit or Configuration.DEFAULT_LIMIT)
         # if limit > Configuration.DEFAULT_LIMIT:
         #     limit = Configuration.DEFAULT_LIMIT

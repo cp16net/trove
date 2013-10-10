@@ -23,6 +23,7 @@ import json
 from trove.common import cfg
 from trove.common import exception
 from trove.common import pagination
+from trove.common import template
 from trove.common import utils
 from trove.common import wsgi
 from trove.configuration import models
@@ -30,6 +31,7 @@ from trove.configuration import views
 from trove.configuration.models import ConfigurationItem
 from trove.openstack.common import log as logging
 from trove.openstack.common.gettextutils import _
+from trove.instance import models as instances_models
 
 
 CONF = cfg.CONF
@@ -144,7 +146,6 @@ class ConfigurationsController(wsgi.Controller):
             group.items = items
 
         models.Configuration.save(context, group)
-
 
     @staticmethod
     def _validate_configuration(values):

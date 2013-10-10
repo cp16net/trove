@@ -316,6 +316,23 @@ class InstanceController(wsgi.Controller):
 
         return wsgi.Result(None, 202)
 
+    def configuration(self, req, tenant_id, id):
+        LOG.debug("getting the default configuration for the instance(%s)" % id)
+        context = req.environ[wsgi.CONTEXT_KEY]
+        instance = models.Instance.load(context, id)
+        # server = models.load_instance_with_guest(
+        #     models.DetailInstance, context, id)
+        LOG.debug("server: %s" % instance)
+        flavor = instance.get_flavor()
+        LOG.debug("flavor: %s" % flavor)
+        config = template.SingleInstanceConfigTemplate(
+            instance.service_type, flavor, id)
+
+        ret = config.render_dict()
+        LOG.debug("default config for instance is: %s" % ret)
+        return wsgi.Result(views.DefaultConfigurationView(
+                           ret).data(), 200)
+
     @staticmethod
     def _validate_body_not_empty(body):
         """Check that the body is not empty"""

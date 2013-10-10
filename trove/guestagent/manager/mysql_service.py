@@ -864,22 +864,7 @@ class MySqlApp(object):
         LOG.info(_("Writing new temp overrides.cnf file."))
 
         overrides = open(MYCNF_OVERRIDES_TMP, 'w')
-
-        # write the header of the overrides file
-        overrides.write("[mysqld]\n")
-
-        # overrides that have empty values should be expressed as-is and
-        # with no equals + value parameter.
-        for k, v in overrideValues.iteritems():
-            if v is True:
-                overrides.write("%s = 1\n" % k)
-            elif v is False:
-                overrides.write("%s = 0\n" % k)
-            elif v == "":
-                overrides.write("%s\n" % k)
-            else:
-                overrides.write("%s = %s\n" % (k, v))
-
+        overrides.write(overrideValues)
         overrides.close()
         LOG.info(_("Moving overrides.cnf into correct location."))
         utils.execute_with_timeout("sudo", "mv", MYCNF_OVERRIDES_TMP,
