@@ -2,7 +2,7 @@
     "configuration-parameters": [
         {
             "key_buffer_size": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 4294967296,
                 "min": 0,
                 "type": "integer"
@@ -10,7 +10,7 @@
         },
         {
             "connect_timeout": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 65535,
                 "min": 1,
                 "type": "integer"
@@ -18,7 +18,7 @@
         },
         {
             "join_buffer_size": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 4294967296,
                 "min": 0,
                 "type": "integer"
@@ -26,7 +26,7 @@
         },
         {
             "sort_buffer_size": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 18446744073709547520,
                 "min": 32768,
                 "type": "integer"
@@ -34,7 +34,7 @@
         },
         {
             "innodb_buffer_pool_size": {
-                "dynamic": "false",
+                "dynamic": false,
                 "max": 68719476736,
                 "min": 0,
                 "type": "integer"
@@ -42,7 +42,7 @@
         },
         {
             "innodb_flush_log_at_trx_commit": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 2,
                 "min": 0,
                 "type": "integer"
@@ -50,7 +50,7 @@
         },
         {
             "innodb_log_buffer_size": {
-                "dynamic": "false",
+                "dynamic": false,
                 "max": 4294967296,
                 "min": 1048576,
                 "type": "integer"
@@ -58,7 +58,7 @@
         },
         {
             "innodb_log_file_size": {
-                "dynamic": "false",
+                "dynamic": false,
                 "max": 4294967296,
                 "min": 1048576,
                 "type": "integer"
@@ -66,7 +66,7 @@
         },
         {
             "innodb_open_files": {
-                "dynamic": "false",
+                "dynamic": false,
                 "max": 4294967296,
                 "min": 10,
                 "type": "integer"
@@ -74,7 +74,7 @@
         },
         {
             "innodb_thread_concurrency": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 1000,
                 "min": 0,
                 "type": "integer"
@@ -82,7 +82,7 @@
         },
         {
             "sync_binlog": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 18446744073709547520,
                 "min": 0,
                 "type": "integer"
@@ -90,7 +90,7 @@
         },
         {
             "auto_increment_increment": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 65535,
                 "min": 1,
                 "type": "integer"
@@ -98,7 +98,7 @@
         },
         {
             "auto_increment_offset": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 65535,
                 "min": 1,
                 "type": "integer"
@@ -106,7 +106,7 @@
         },
         {
             "bulk_insert_buffer_size": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 18446744073709547520,
                 "min": 0,
                 "type": "integer"
@@ -114,7 +114,7 @@
         },
         {
             "expire_logs_days": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 65535,
                 "min": 1,
                 "type": "integer"
@@ -122,7 +122,7 @@
         },
         {
             "ft_min_word_len": {
-                "dynamic": "false",
+                "dynamic": false,
                 "max": 65535,
                 "min": 1,
                 "type": "integer"
@@ -130,7 +130,7 @@
         },
         {
             "connect_timeout": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 65535,
                 "min": 1,
                 "type": "integer"
@@ -138,7 +138,7 @@
         },
         {
             "interactive_timeout": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 65535,
                 "min": 1,
                 "type": "integer"
@@ -146,7 +146,7 @@
         },
         {
             "max_allowed_packet": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 1073741824,
                 "min": 1024,
                 "type": "integer"
@@ -154,7 +154,7 @@
         },
         {
             "max_connect_errors": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 18446744073709547520,
                 "min": 1,
                 "type": "integer"
@@ -162,7 +162,7 @@
         },
         {
             "max_connections": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 65535,
                 "min": 1,
                 "type": "integer"
@@ -170,7 +170,7 @@
         },
         {
             "max_heap_table_size": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 18446744073709547520,
                 "min": 16384,
                 "type": "integer"
@@ -178,7 +178,7 @@
         },
         {
             "tmp_table_size": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 4294967295,
                 "min": 1024,
                 "type": "integer"
@@ -186,7 +186,7 @@
         },
         {
             "myisam_sort_buffer_size": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 18446744073709547520,
                 "min": 4,
                 "type": "integer"
@@ -194,7 +194,7 @@
         },
         {
             "thread_cache_size": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 16384,
                 "min": 0,
                 "type": "integer"
@@ -202,7 +202,7 @@
         },
         {
             "query_cache_size": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 18446744073709547520,
                 "min": 0,
                 "type": "integer"
@@ -210,7 +210,7 @@
         },
         {
             "table_open_cache": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 524288,
                 "min": 400,
                 "type": "integer"
@@ -218,7 +218,7 @@
         },
         {
             "table_definition_cache": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 524288,
                 "min": 400,
                 "type": "integer"
@@ -226,7 +226,7 @@
         },
         {
             "open_files_limit": {
-                "dynamic": "false",
+                "dynamic": false,
                 "max": 65535,
                 "min": 0,
                 "type": "integer"
@@ -234,7 +234,7 @@
         },
         {
             "max_user_connections": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 100000,
                 "min": 1,
                 "type": "integer"
@@ -242,7 +242,7 @@
         },
         {
             "server_id": {
-                "dynamic": "false",
+                "dynamic": false,
                 "max": 100000,
                 "min": 1,
                 "type": "integer"
@@ -250,7 +250,7 @@
         },
         {
             "wait_timeout": {
-                "dynamic": "true",
+                "dynamic": true,
                 "max": 31536000,
                 "min": 1,
                 "type": "integer"
