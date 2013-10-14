@@ -99,6 +99,7 @@ class ConfigurationsController(wsgi.Controller):
         return wsgi.Result(None, 202)
 
     def update(self, req, body, tenant_id, id):
+        LOG.info(_("Updating configuration for tenant id %s" % tenant_id))
         context = req.environ[wsgi.CONTEXT_KEY]
         group = models.Configuration.load(context, id)
 
@@ -112,6 +113,7 @@ class ConfigurationsController(wsgi.Controller):
 
         items = []
         if 'values' in body['configuration']:
+            LOG.info(_("Updating values on configuration"))
             # validate that the values passed in are permitted by the operator.
             ConfigurationsController._validate_configuration(
                 body['configuration']['values'])

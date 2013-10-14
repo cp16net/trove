@@ -677,6 +677,23 @@ class BuiltInstanceTasks(BuiltInstance, NotifyMixin, ConfigurationMixin):
 
     def update_overrides(self, overrides):
         LOG.debug("Updating configuration overrides on instance %s" % self.id)
+        def _get_item(key, dictList):
+            for item in dictList:
+                if key in item:
+                    return item[key]
+        def _do_configs_require_restart(overrides):
+            rules = cfg.get_validation_rules()
+            for key in overrides.iterkeys():
+                rule = _get_item(key, rules['configuration-parameters'])
+                LOG.debug("checking the rule: %s" % rule)
+                if not rule['dynamic']:
+                    return True
+            return False
+        need_restart = _do_configs_require_restart(overrides)
+        LOG.debug("do we need a restart?: %s" % need_restart)
+        if need_restart:
+            self.update_db(task_status=inst_models.InstanceTasks.RESTART_REQUIRED)
+
         config_overrides = self._render_override_config(self.service_type,
                                                         None,
                                                         self.id,

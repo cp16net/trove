@@ -234,7 +234,6 @@ class ListConfigurations(object):
         assert_equal(conf_instances[0]['id'], instance_info.id)
         assert_equal(conf_instances[0]['name'], instance_info.name)
 
-
         # Test to make sure that another user is not able to GET this config
         reqs = Requirements(is_admin=False)
         other_user = CONFIG.users.find_user(reqs,
@@ -247,6 +246,52 @@ class ListConfigurations(object):
     def test_get_default_configuration_on_instance(self):
         result = instance_info.dbaas.instances.configuration(instance_info.id)
         assert_not_equal(None, result.configuration)
+
+    @test
+    def test_changing_configuration_with_nondynamic_parameter(self):
+        values = '{"join_buffer_size": 1048576, "innodb_buffer_pool_size": 5555}'
+        instance_info.dbaas.configurations.update(configuration_info.id,
+            values)
+        resp, body = instance_info.dbaas.client.last_response
+        assert_equal(resp.status, 202)
+
+        result = instance_info.dbaas.configurations.get(configuration_info.id)
+        resp, body = instance_info.dbaas.client.last_response
+        assert_equal(resp.status, 200)
+        # expected_values = json.loads(values)
+        # assert_equal(result.values, expected_values)
+
+        def result_is_not_active():
+            instance = instance_info.dbaas.instances.get(
+                instance_info.id)
+            if instance.status == "ACTIVE":
+                return False
+            else:
+                return True
+        poll_until(result_is_not_active)
+
+        instance = instance_info.dbaas.instances.get(instance_info.id)
+        resp, body = instance_info.dbaas.client.last_response
+        assert_equal(resp.status, 200)
+        print(instance.status)
+        assert_equal('RESTART_REQUIRED', instance.status)
+
+    @test(depends_on=[test_changing_configuration_with_nondynamic_parameter])
+    def test_restart_service_should_return_active(self):
+        instance_info.dbaas.instances.restart(instance_info.id)
+        resp, body = instance_info.dbaas.client.last_response
+        assert_equal(resp.status, 202)
+
+        def result_is_active():
+            instance = instance_info.dbaas.instances.get(
+                instance_info.id)
+            if instance.status == "ACTIVE":
+                return True
+            else:
+                assert_equal("REBOOT", instance.status)
+                return False
+
+        poll_until(result_is_active)
 
 
 @test(depends_on=[ListConfigurations], groups=[GROUP])
@@ -272,7 +317,7 @@ class StartInstanceWithConfiguration(object):
 class WaitForConfigurationInstanceToFinish(object):
 
     @test
-    @time_out(60 * 32)
+    @time_out(60 * 7)
     def test_instance_with_configuration_active(self):
         if test_config.auth_strategy == "fake":
             raise SkipTest("Skipping instance start with configuration "
