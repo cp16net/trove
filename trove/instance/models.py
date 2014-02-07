@@ -22,7 +22,6 @@ from novaclient import exceptions as nova_exceptions
 from trove.common import cfg
 from trove.common import exception
 from trove.common import template
-from trove.common.configurations import do_configs_require_restart
 import trove.common.instance as tr_instance
 from trove.common.remote import create_dns_client
 from trove.common.remote import create_guest_client
@@ -554,8 +553,8 @@ class Instance(BuiltInstance):
             # generate an overrides dict to pass into the instance creation
             # method
 
-            overrides = Configuration.get_configuration_overrides(
-                context, configuration_id)
+            config = Configuration(context, configuration_id)
+            overrides = config.get_configuration_overrides()
             service_status = InstanceServiceStatus.create(
                 instance_id=db_info.id,
                 status=tr_instance.ServiceStatuses.NEW)
@@ -708,7 +707,7 @@ class Instance(BuiltInstance):
         LOG.debug(_("Unassigning the configuration from the instance %s")
                   % self.id)
         LOG.debug(_("Unassigning the configuration id %s")
-                  % self.configuration.id)
+                  % self.configuration)
         if self.configuration and self.configuration.id:
             flavor = self.get_flavor()
             config_id = self.configuration.id
@@ -733,19 +732,15 @@ class Instance(BuiltInstance):
                 config_datastore_version=config_ds_v,
                 instance_datastore_version=inst_ds_v)
 
-        overrides = Configuration.get_configuration_overrides(
-            self.context, configuration.id)
-
-        LOG.info(overrides)
-
-        self.update_overrides(overrides)
+        config = Configuration(self.context, configuration.id)
         self.update_db(configuration_id=configuration.id)
+        self.update_overrides(config)
 
-    def update_overrides(self, overrides):
+    def update_overrides(self, config):
         LOG.debug(_("Updating or removing overrides for instance %s")
                   % self.id)
-        need_restart = do_configs_require_restart(
-            overrides, datastore_manager=self.ds_version.manager)
+        overrides = config.get_configuration_overrides()
+        need_restart = config.does_configuration_need_restart()
         LOG.debug(_("config overrides has non-dynamic settings, "
                     "requires a restart: %s") % need_restart)
         if need_restart:

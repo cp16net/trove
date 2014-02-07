@@ -29,6 +29,7 @@ from trove.common import utils
 from trove.db import get_db_api
 from trove.openstack.common import log as logging
 from trove.datastore import models as datastore_models
+from trove.configuration import models as config_models
 
 
 CONF = cfg.CONF
@@ -82,6 +83,14 @@ class Commands(object):
         self.db_api.drop_db(CONF)
         self.db_sync()
 
+    def load_datastore_config_parameters(self,
+                                         datastore_version_id,
+                                         config_file_location):
+        print(datastore_version_id)
+        print(config_file_location)
+        config_models.load_datastore_configuration_parameters(
+            datastore_version_id, config_file_location)
+
     def params_of(self, command_name):
         if Commands.has(command_name):
             return utils.MethodInspector(getattr(self, command_name))
@@ -115,6 +124,10 @@ def main():
 
         parser = subparser.add_parser('db_wipe')
         parser.add_argument('repo_path')
+
+        parser = subparser.add_parser('load_datastore_config_parameters')
+        parser.add_argument('datastore_version_id')
+        parser.add_argument('config_file_location')
 
     cfg.custom_parser('action', actions)
     cfg.parse_args(sys.argv)

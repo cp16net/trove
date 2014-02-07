@@ -425,6 +425,27 @@ configuration = {
     }
 }
 
+mgmt_configuration = {
+    "create": {
+        "name": "configuration_parameter:create",
+        "type": "object",
+        "required": ["configuration-parameter"],
+        "properties": {
+            "configuration-parameter": {
+                "type": "object",
+                "required": ["name", "restart_required", "data_type"],
+                "properties": {
+                    "name": non_empty_string,
+                    "data_type": non_empty_string,
+                    "restart_required": non_empty_string,
+                    "max_size": non_empty_string,
+                    "min_size": non_empty_string,
+                }
+            }
+        }
+    },
+}
+
 account = {
     'create': {
         "type": "object",

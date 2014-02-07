@@ -98,10 +98,33 @@ class DetailedConfigurationView(object):
         return {"configuration": configuration_dict}
 
 
-class ConfigurationParametersView(object):
+class ConfigurationParameterView(object):
 
-    def __init__(self, configuration_parameters):
-        self.configuration_parameters = configuration_parameters
+    def __init__(self, config):
+        self.config = config
 
     def data(self):
-        return self.configuration_parameters
+        ret = {
+            "id": self.config.id,
+            "name": self.config.name,
+            "restart_required": self.config.restart_required,
+            "type": self.config.data_type,
+        }
+        if self.config.max_size:
+            ret["max_size"] = int(self.config.max_size)
+        if self.config.min_size:
+            ret["min_size"] = int(self.config.min_size)
+        return ret
+
+
+class ConfigurationParametersView(object):
+
+    def __init__(self, configs):
+        self.configs = configs
+
+    def data(self):
+        params = []
+        for p in self.configs:
+            param = ConfigurationParameterView(p)
+            params.append(param.data())
+        return {"configuration-parameters": params}

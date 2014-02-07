@@ -253,35 +253,27 @@ class ParametersController(wsgi.Controller):
     def index(self, req, tenant_id, datastore, id):
         ds, ds_version = ds_models.get_datastore_version(
             type=datastore, version=id)
-        rules = configurations.get_validation_rules(
-            datastore_manager=ds_version.manager)
+        rules = models.DatastoreConfigurationParameters.load_parameters(
+            ds_version.id)
         return wsgi.Result(views.ConfigurationParametersView(rules).data(),
                            200)
 
     def show(self, req, tenant_id, datastore, id, name):
         ds, ds_version = ds_models.get_datastore_version(
             type=datastore, version=id)
-        rules = configurations.get_validation_rules(
-            datastore_manager=ds_version.manager)
-        for rule in rules['configuration-parameters']:
-            if rule['name'] == name:
-                return wsgi.Result(
-                    views.ConfigurationParametersView(rule).data(), 200)
-        raise exception.ConfigKeyNotFound(key=name)
+        rule = models.DatastoreConfigurationParameters.load_parameter_by_name(
+            name)
+        return wsgi.Result(views.ConfigurationParameterView(rule).data(), 200)
 
     def index_by_version(self, req, tenant_id, version):
         ds_version = ds_models.DatastoreVersion.load_by_uuid(version)
-        rules = configurations.get_validation_rules(
-            datastore_manager=ds_version.manager)
+        rules = models.DatastoreConfigurationParameters.load_parameters(
+            ds_version.id)
         return wsgi.Result(views.ConfigurationParametersView(rules).data(),
                            200)
 
     def show_by_version(self, req, tenant_id, version, name):
-        ds_version = ds_models.DatastoreVersion.load_by_uuid(version)
-        rules = configurations.get_validation_rules(
-            datastore_manager=ds_version.manager)
-        for rule in rules['configuration-parameters']:
-            if rule['name'] == name:
-                return wsgi.Result(
-                    views.ConfigurationParametersView(rule).data(), 200)
-        raise exception.ConfigKeyNotFound(key=name)
+        ds_models.DatastoreVersion.load_by_uuid(version)
+        rule = models.DatastoreConfigurationParameters.load_parameter_by_name(
+            name)
+        return wsgi.Result(views.ConfigurationParameterView(rule).data(), 200)

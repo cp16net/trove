@@ -164,8 +164,8 @@ class CreateConfigurations(object):
     def test_expected_get_configuration_parameter(self):
         # tests get on a single parameter to verify it has expected attributes
         param = 'key_buffer_size'
-        expected_config_params = ['name', 'restart_required', 'max',
-                                  'min', 'type']
+        expected_config_params = ['id', 'name', 'restart_required',
+                                  'max_size', 'min_size', 'type']
         instance_info.dbaas.configuration_parameters.get_parameter(
             instance_info.dbaas_datastore,
             instance_info.dbaas_datastore_version,

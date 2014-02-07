@@ -19,6 +19,7 @@ from trove.common import extensions
 from trove.common import wsgi
 from trove.extensions.mgmt.instances.service import MgmtInstanceController
 from trove.extensions.mgmt.host.service import HostController
+from trove.extensions.mgmt.configuration import service as conf_service
 from trove.extensions.mgmt.quota.service import QuotaController
 from trove.extensions.mgmt.host.instance import service as hostservice
 from trove.extensions.mgmt.volume.service import StorageController
@@ -94,4 +95,16 @@ class Mgmt(extensions.ExtensionsDescriptor):
             collection_actions={'action': 'POST'})
         resources.append(host_instances)
 
+        datastore_configuration_parameters = extensions.ResourceExtension(
+            '{tenant_id}/mgmt/datastores/versions/{version_id}/parameters',
+            conf_service.ConfigurationsParameterController(),
+            deserializer=wsgi.RequestDeserializer(),
+            serializer=serializer,
+            member_actions={})
+        resources.append(datastore_configuration_parameters)
+
+        LOG.debug("****************************************************")
+        LOG.debug("mgmt api resources")
+        LOG.debug(resources)
+        LOG.debug("****************************************************")
         return resources

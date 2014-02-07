@@ -13,12 +13,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import json
 from datetime import datetime
 
 from trove.common import cfg
 from trove.common import configurations
+from trove.common import utils
 from trove.common.exception import ModelNotFoundError
 from trove.datastore.models import DatastoreVersion
+from trove.db import get_db_api
 from trove.db import models as dbmodels
 from trove.openstack.common import log as logging
 from trove.openstack.common.gettextutils import _
@@ -65,6 +68,10 @@ class Configurations(object):
 
 
 class Configuration(object):
+
+    def __init__(self, context, configuration_id):
+        self.context = context
+        self.configuration_id = configuration_id
 
     @property
     def instances(self):
@@ -164,17 +171,26 @@ class Configuration(object):
                 item.configuration_value = str(item.configuration_value)
         return config_items
 
-    @staticmethod
-    def get_configuration_overrides(context, configuration_id):
+    def get_configuration_overrides(self):
         """Gets the overrides dict to apply to an instance"""
         overrides = {}
-        if configuration_id:
-            config_items = Configuration.load_items(context,
-                                                    id=configuration_id)
+        if self.configuration_id:
+            config_items = Configuration.load_items(self.context,
+                                                    id=self.configuration_id)
 
             for i in config_items:
                 overrides[i.configuration_key] = i.configuration_value
         return overrides
+
+    def does_configuration_need_restart(self):
+        config_items = Configuration.load_items(self.context,
+                                                id=self.configuration_id)
+        for i in config_items:
+            details = DatastoreConfigurationParameters.load_parameter_by_name(
+                i.configuration_key)
+            if bool(details.restart_required):
+                return True
+        return False
 
     @staticmethod
     def save(context, configuration, configuration_items, instances):
@@ -208,8 +224,99 @@ class ConfigurationParameter(dbmodels.DatabaseModelBase):
         return self.configuration_key.__hash__()
 
 
+class DatastoreConfigurationParameters(dbmodels.DatabaseModelBase):
+    """Model for storing the configuration parameters on a datastore"""
+    _auto_generated_attrs = ['id']
+    _data_fields = [
+        'name',
+        'datastore_version_id',
+        'restart_required',
+        'max_size',
+        'min_size',
+        'data_type',
+        'deleted',
+        'deleted_at',
+    ]
+    _table_name = "datastore_configuration_parameters"
+    preserve_on_delete = True
+
+    @classmethod
+    def load_parameters(cls, datastore_version_id):
+        config_parameters = get_db_api().find_all(
+            cls,
+            datastore_version_id=datastore_version_id
+        )
+        return config_parameters
+
+    @classmethod
+    def load_parameter(cls, config_id):
+        config_parameter = get_db_api().find_by(cls,
+                                                config_id)
+        return config_parameter
+
+    @classmethod
+    def load_parameter_by_name(cls, config_name):
+        config_parameter = get_db_api().find_by(cls,
+                                                name=config_name)
+        return config_parameter
+
+
+def create_datastore_configuration_parameter(name, datastore_version_id,
+                                             restart_required, data_type,
+                                             max_size, min_size):
+    get_db_api().configure_db(CONF)
+    datastore_version = DatastoreVersion.load_by_uuid(datastore_version_id)
+    config = DatastoreConfigurationParameters(
+        id=utils.generate_uuid(),
+        name=name,
+        datastore_version_id=datastore_version.id,
+        restart_required=restart_required,
+        data_type=data_type,
+        max_size=max_size,
+        min_size=min_size,
+        deleted=False,
+    )
+    get_db_api().save(config)
+
+
+def modify_datastore_configuration_parameter(id, name, datastore_version_id,
+                                             restart_required, data_type,
+                                             max_size, min_size):
+    get_db_api().configure_db(CONF)
+    config = DatastoreConfigurationParameters.load_parameter(id)
+    datastore_version = DatastoreVersion.load_by_uuid(datastore_version_id)
+    config.name = name
+    config.datastore_version_id = datastore_version.id
+    config.restart_required = restart_required
+    config.data_type = data_type
+    config.max_size = max_size
+    config.min_size = min_size
+    get_db_api().save(config)
+
+
+def delete_datastore_configuration_parameter(id):
+    get_db_api().configure_db(CONF)
+    config = DatastoreConfigurationParameters.load_parameter(id)
+    config.delete()
+
+
+def load_datastore_configuration_parameters(datastore_version_id, config_file):
+    with open(config_file) as f:
+        config = json.load(f)
+        for param in config['configuration-parameters']:
+            create_datastore_configuration_parameter(
+                param['name'],
+                datastore_version_id,
+                param['restart_required'],
+                param['type'],
+                param.get('max'),
+                param.get('min'),
+            )
+
+
 def persisted_models():
     return {
         'configurations': DBConfiguration,
-        'configuration_parameters': ConfigurationParameter
+        'configuration_parameters': ConfigurationParameter,
+        'datastore_configuration_parameters': DatastoreConfigurationParameters,
     }
