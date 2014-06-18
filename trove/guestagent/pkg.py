@@ -178,7 +178,10 @@ class RedhatPackagerMixin(BasePackagerMixin):
                 raise PkgPackageStateError("Cannot install packages.")
 
     def pkg_is_installed(self, packages):
-        pkg_list = packages.split()
+        if isinstance(o, basestring):
+            pkg_list = packages.split()
+        else:
+            pkg_list = packages
         cmd = "rpm -qa"
         p = commands.getstatusoutput(cmd)
         std_out = p[1]
