@@ -95,15 +95,24 @@ def clear_expired_password():
 
 
 def get_auth_password():
-    pwd, err = utils.execute_with_timeout(
-        "sudo",
-        "awk",
-        "/password\\t=/{print $3; exit}",
-        MYSQL_CONFIG)
-    if err:
-        LOG.error(err)
-        raise RuntimeError("Problem reading my.cnf! : %s" % err)
-    return pwd.strip()
+    user_name = None
+    password = None
+    with open(MYSQL_CONFIG, 'r') as f:
+        is_in_client = False
+        lines = f.readlines()
+        for line in lines:
+            print(line)
+            if "[client]" in line:
+                is_in_client = True
+            elif is_in_client:
+                m = re.match("^(\\w+)\\s*=\\s*['\"]?(.[^'\"]*)['\"]?\\s*$", line)
+                if m and m.group(2):
+                    if "user" == m.group(1):
+                        user_name = m.group(2)
+                    elif "password" == m.group(1):
+                        password = m.group(2)
+    if user_name and password:
+        return password.strip()
 
 
 def get_engine():
