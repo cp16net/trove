@@ -271,7 +271,7 @@ class DebianPackagerMixin(BasePackagerMixin):
         cmd = "sudo -E DEBIAN_FRONTEND=noninteractive apt-get -y " \
               "--force-yes --allow-unauthenticated -o " \
               "DPkg::options::=--force-confmiss --reinstall " \
-              "install %s" % packages
+              "install %s" % " ".join(packages)
         output_expects = ['.*password*',
                           'E: Unable to locate package (.*)',
                           "Couldn't find package (.*)",
@@ -361,8 +361,7 @@ class DebianPackagerMixin(BasePackagerMixin):
                 return version
 
     def pkg_is_installed(self, packages):
-        pkg_list = packages.split()
-        for pkg in pkg_list:
+        for pkg in packages:
             m = re.match('(.+)=(.+)', pkg)
             if m:
                 package_name = m.group(1)
