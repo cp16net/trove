@@ -26,6 +26,7 @@ from sqlalchemy import interfaces
 from sqlalchemy.sql.expression import text
 
 from trove.common import cfg
+from trove.common import configurations
 from trove.common import utils as utils
 from trove.common import exception
 from trove.common import instance as rd_instance
@@ -95,15 +96,18 @@ def clear_expired_password():
 
 
 def get_auth_password():
-    pwd, err = utils.execute_with_timeout(
-        "sudo",
-        "awk",
-        "/password\\t=/{print $3; exit}",
-        MYSQL_CONFIG)
-    if err:
-        LOG.error(err)
-        raise RuntimeError("Problem reading my.cnf! : %s" % err)
-    return pwd.strip()
+    user_name = None
+    password = None
+    with open(MYSQL_CONFIG, 'r') as f:
+        content = f.read()
+        parser = configurations.MySQLConfParser(content)
+        content_dict = parser.parse_client()
+        user_name = content_dict.get("user")
+        password = content_dict.get("password")
+
+    if user_name and password:
+        return password.strip()
+    raise Exception(_("No auth password found in file %s") % MYSQL_CONFIG)
 
 
 def get_engine():

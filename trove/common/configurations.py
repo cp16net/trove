@@ -61,11 +61,18 @@ class MySQLConfParser(object):
     def __init__(self, config):
         self.config = config
 
-    def parse(self):
+    def _parse(self):
         good_cfg = self._remove_commented_lines(str(self.config))
         cfg_parser = configparser.ConfigParser()
-        cfg_parser.readfp(io.BytesIO(str(good_cfg)))
-        return cfg_parser.items("mysqld")
+        return cfg_parser.readfp(io.BytesIO(str(good_cfg)))
+
+    def parse(self):
+        cfg = self._parse()
+        return cfg.items("mysqld")
+
+    def parse_client(self):
+        cfg = self._parse()
+        return cfg.items("client")
 
     def _remove_commented_lines(self, config_str):
         ret = []

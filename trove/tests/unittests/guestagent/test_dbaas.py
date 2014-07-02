@@ -19,6 +19,7 @@ from mock import Mock
 from mock import MagicMock
 from mock import patch
 from mock import ANY
+from mock import mock_open
 import sqlalchemy
 import testtools
 from testtools.matchers import Is
@@ -97,14 +98,18 @@ class DbaasTest(testtools.TestCase):
         dbaas.utils.execute_with_timeout = Mock(
             return_value=("password    ", None))
 
-        password = dbaas.get_auth_password()
+        m = mock_open()
+        with patch('file.open', m, create=True):
+            password = dbaas.get_auth_password()
 
         self.assertEqual("password", password)
 
     def test_get_auth_password_error(self):
 
-        dbaas.utils.execute_with_timeout = Mock(
-            return_value=("password", "Error"))
+        m = mock_open()
+        with patch('file.open', m, create=True):
+            dbaas.utils.execute_with_timeout = Mock(
+                return_value=("password", "Error"))
 
         self.assertRaises(RuntimeError, dbaas.get_auth_password)
 
@@ -161,13 +166,14 @@ class MySqlAdminMockTest(testtools.TestCase):
 
     def test_list_databases(self):
         mock_conn = mock_sql_connection()
-
-        with patch.object(mock_conn, 'execute',
-                          return_value=ResultSetStub(
-                [('db1', 'utf8', 'utf8_bin'),
-                 ('db2', 'utf8', 'utf8_bin'),
-                 ('db3', 'utf8', 'utf8_bin')])):
-            databases, next_marker = MySqlAdmin().list_databases(limit=10)
+        m = mock_open()
+        with patch('file.open', m, create=True):
+            with patch.object(mock_conn, 'execute',
+                              return_value=ResultSetStub(
+                    [('db1', 'utf8', 'utf8_bin'),
+                     ('db2', 'utf8', 'utf8_bin'),
+                     ('db3', 'utf8', 'utf8_bin')])):
+                databases, next_marker = MySqlAdmin().list_databases(limit=10)
 
         self.assertThat(next_marker, Is(None))
         self.assertThat(len(databases), Is(3))
@@ -854,17 +860,19 @@ class MySqlRootStatusTest(testtools.TestCase):
     def test_enable_root(self):
         mock_conn = mock_sql_connection()
 
-        with patch.object(mock_conn, 'execute', return_value=None):
-            # invocation
-            user_ser = MySqlRootAccess.enable_root()
-            # verification
-            self.assertThat(user_ser, Not(Is(None)))
-            mock_conn.execute.assert_any_call(TextClauseMatcher('CREATE USER'),
-                                              user='root', host='%')
-            mock_conn.execute.assert_any_call(TextClauseMatcher(
-                'GRANT ALL PRIVILEGES ON *.*'))
-            mock_conn.execute.assert_any_call(TextClauseMatcher(
-                'UPDATE mysql.user'))
+        m = mock_open()
+        with patch('file.open', m, create=True):
+            with patch.object(mock_conn, 'execute', return_value=None):
+                # invocation
+                user_ser = MySqlRootAccess.enable_root()
+                # verification
+                self.assertThat(user_ser, Not(Is(None)))
+                mock_conn.execute.assert_any_call(TextClauseMatcher(
+                    'CREATE USER'), user='root', host='%')
+                mock_conn.execute.assert_any_call(TextClauseMatcher(
+                    'GRANT ALL PRIVILEGES ON *.*'))
+                mock_conn.execute.assert_any_call(TextClauseMatcher(
+                    'UPDATE mysql.user'))
 
     def test_enable_root_failed(self):
         with patch.object(models.MySQLUser, '_is_valid_user_name',
