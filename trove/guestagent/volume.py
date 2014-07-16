@@ -84,8 +84,8 @@ class VolumeDevice(object):
                                          format_options, self.device_path)
         volume_format_timeout = CONF.volume_format_timeout
         child = pexpect.spawn(cmd, timeout=volume_format_timeout)
-        # child.expect("(y,n)")
-        # child.sendline('y')
+        child.expect("Proceed anyway? (y,n)")
+        child.sendline('y')
         child.expect(pexpect.EOF)
 
     def format(self):
