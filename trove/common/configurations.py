@@ -64,15 +64,16 @@ class MySQLConfParser(object):
     def _parse(self):
         good_cfg = self._remove_commented_lines(str(self.config))
         cfg_parser = configparser.ConfigParser()
-        return cfg_parser.readfp(io.BytesIO(str(good_cfg)))
+        cfg_parser.readfp(io.BytesIO(str(good_cfg)))
+        return cfg_parser
 
     def parse(self):
         cfg = self._parse()
         return cfg.items("mysqld")
 
-    def parse_client(self):
+    def parse_raw(self):
         cfg = self._parse()
-        return cfg.items("client")
+        return cfg
 
     def _remove_commented_lines(self, config_str):
         ret = []
@@ -89,6 +90,9 @@ class MySQLConfParser(object):
                 ret.append(line_clean)
             elif line_clean and "=" not in line_clean:
                 ret.append(line_clean + " = 1")
+            elif '#' in line_clean:
+                start_comment = line_clean.find('#')
+                ret.append(line_clean[:start_comment])
             else:
                 ret.append(line_clean)
         rendered = "\n".join(ret)

@@ -101,9 +101,9 @@ def get_auth_password():
     with open(MYSQL_CONFIG, 'r') as f:
         content = f.read()
         parser = configurations.MySQLConfParser(content)
-        content_dict = parser.parse_client()
-        user_name = content_dict.get("user")
-        password = content_dict.get("password")
+        content_dict = parser.parse_raw()
+        user_name = content_dict.get("client", "user")
+        password = content_dict.get("client", "password")
 
     if user_name and password:
         return password.strip()
