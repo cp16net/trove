@@ -677,3 +677,30 @@ class GuestAgentManagerTest(testtools.TestCase):
                           self.context, '/var/lib/mysql', app)
         app.status.set_status.assert_called_with(
             rd_instance.ServiceStatuses.FAILED)
+
+    def test_install_cluster(self):
+        mock_status = MagicMock()
+        dbaas.MySqlAppStatus.get = MagicMock(return_value=mock_status)
+
+        dbaas.MySqlApp.install_cluster = MagicMock(return_value=None)
+
+        replication_user = "repuser"
+        configuration = "configuration"
+        bootstrap = True
+        self.manager.install_cluster(self.context, replication_user,
+                                     configuration, bootstrap)
+        dbaas.MySqlAppStatus.get.assert_any_call()
+        dbaas.MySqlApp.install_cluster.assert_called_with(
+            replication_user, configuration, bootstrap)
+
+    def test_reset_admin_password(self):
+        mock_status = MagicMock()
+        dbaas.MySqlAppStatus.get = MagicMock(return_value=mock_status)
+
+        dbaas.MySqlApp.reset_admin_password = MagicMock(return_value=None)
+
+        admin_password = "password"
+        self.manager.reset_admin_password(self.context, admin_password)
+        dbaas.MySqlAppStatus.get.assert_any_call()
+        dbaas.MySqlApp.reset_admin_password.assert_called_with(
+            admin_password)

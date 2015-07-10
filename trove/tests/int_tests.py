@@ -26,6 +26,7 @@ from trove.tests.api.mgmt import admin_required
 from trove.tests.api.mgmt import hosts
 from trove.tests.api.mgmt import instances as mgmt_instances
 from trove.tests.api.mgmt import storage
+from trove.tests.api import pxc
 from trove.tests.api import replication
 from trove.tests.api import root
 from trove.tests.api import user_access
@@ -107,3 +108,10 @@ vertica_group = [
 ]
 proboscis.register(groups=["vertica"],
                    depends_on_groups=vertica_group)
+
+# PXC int-tests
+pxc_group = [
+    pxc.PXC_GROUP,
+]
+proboscis.register(groups=["pxc"],
+                   depends_on_groups=pxc_group)

@@ -19,6 +19,7 @@
 from collections import defaultdict
 import os
 import re
+import time
 import uuid
 
 from oslo_log import log as logging
@@ -67,6 +68,8 @@ MYSQL_SERVICE_CANDIDATES = ["mysql", "mysqld", "mysql-server"]
 MYSQL_BIN_CANDIDATES = ["/usr/sbin/mysqld", "/usr/libexec/mysqld"]
 MYCNF_OVERRIDES = "/etc/mysql/conf.d/overrides.cnf"
 MYCNF_OVERRIDES_TMP = "/tmp/overrides.cnf.tmp"
+MYCNF_CLUSTER = "/etc/mysql/conf.d/cluster.cnf"
+MYCNF_CLUSTER_TMP = "/tmp/cluster.cnf.tmp"
 MYCNF_REPLMASTER = "/etc/mysql/conf.d/0replmaster.cnf"
 MYCNF_REPLSLAVE = "/etc/mysql/conf.d/1replslave.cnf"
 MYCNF_REPLCONFIG_TMP = "/tmp/replication.cnf.tmp"
@@ -189,8 +192,8 @@ class MySqlAppStatus(service.BaseDbStatus):
     def _get_actual_db_status(self):
         try:
             out, err = utils.execute_with_timeout(
-                "/usr/bin/mysqladmin",
-                "ping", run_as_root=True, root_helper="sudo",
+                "/usr/bin/mysqladmin", "ping",
+                run_as_root=True, root_helper="sudo",
                 log_output_on_error=True)
             LOG.info(_("MySQL Service Status is RUNNING."))
             return rd_instance.ServiceStatuses.RUNNING
@@ -628,10 +631,32 @@ class MySqlApp(object):
             packager.pkg_install(packages, pkg_opts, self.TIME_OUT)
             self._create_mysql_confd_dir()
             LOG.info(_("Finished installing MySQL server."))
-        self.start_mysql()
+        self.start_mysql(disable_on_boot=True)
 
     def complete_install_or_restart(self):
         self.status.end_install_or_restart()
+
+    def _test_mysql(self):
+        engine = sqlalchemy.create_engine("mysql://root:@localhost:3306",
+                                          echo=True)
+        try:
+            with LocalSqlClient(engine) as client:
+                out = client.execute(text("select 1;"))
+                for line in out:
+                    LOG.debug("line: %s" % line)
+                return True
+        except Exception:
+            return False
+
+    def wait_for_mysql_to_be_really_alive(self, max_time):
+        WAIT_TIME = 3
+        waited_time = 0
+        while waited_time < max_time:
+            time.sleep(WAIT_TIME)
+            waited_time += WAIT_TIME
+            if self._test_mysql():
+                return True
+        return False
 
     def secure(self, config_contents, overrides):
         LOG.info(_("Generating admin password."))
@@ -641,12 +666,34 @@ class MySqlApp(object):
                                           echo=True)
         with LocalSqlClient(engine) as client:
             self._remove_anonymous_user(client)
+            LOG.debug("removed anon user")
             self._create_admin_user(client, admin_password)
-
+            LOG.debug("created admin user/pass")
+        self.stop_db()
+        LOG.debug("stopped db")
+        self._write_mycnf(None, config_contents, overrides)
+        LOG.debug("write the mysql config and overrides and all that stuff")
+        self.start_mysql(update_db=False)
+        # TODO(cp16net) should remove this...
+        try:
+            with LocalSqlClient(engine) as client:
+                query = text("select Host, User, Password from mysql.user;")
+                output = client.execute(query)
+                for line in output:
+                    LOG.debug(line)
+        except Exception:
+            LOG.debug('failed to query mysql')
+        # creating the admin user after the config files are written because
+        # percona pxc was not commiting the grant for the admin user after
+        # removing the annon users.
+        self.wait_for_mysql_to_be_really_alive(120)
+        with LocalSqlClient(engine) as client:
+            self._create_admin_user(client, admin_password)
+            LOG.debug("created admin user/pass")
         self.stop_db()
         self._write_mycnf(admin_password, config_contents, overrides)
         self.start_mysql()
-
+        self.wait_for_mysql_to_be_really_alive(120)
         LOG.debug("MySQL secure complete.")
 
     def secure_root(self, secure_remote_root=True):
@@ -702,7 +749,8 @@ class MySqlApp(object):
         try:
             mysql_service = operating_system.service_discovery(
                 MYSQL_SERVICE_CANDIDATES)
-            utils.execute_with_timeout(mysql_service['cmd_stop'], shell=True)
+            utils.execute_with_timeout(mysql_service['cmd_stop'],
+                                       shell=True)
         except KeyError:
             LOG.exception(_("Error stopping MySQL."))
             raise RuntimeError("Service is not discovered.")
@@ -762,12 +810,12 @@ class MySqlApp(object):
             client.execute(text(str(q)))
 
     def _write_temp_mycnf_with_admin_account(self, original_file_path,
-                                             temp_file_path, password):
+                                             temp_file_path, password=None):
         mycnf_file = open(original_file_path, 'r')
         tmp_file = open(temp_file_path, 'w')
         for line in mycnf_file:
             tmp_file.write(line)
-            if "[client]" in line:
+            if "[client]" in line and password:
                 tmp_file.write("user\t\t= %s\n" % ADMIN_USER_NAME)
                 tmp_file.write("password\t= %s\n" % password)
         mycnf_file.close()
@@ -946,18 +994,21 @@ class MySqlApp(object):
                 _("Replication is not %(status)s after %(max)d seconds.") % {
                     'status': status.lower(), 'max': max_time})
 
-    def start_mysql(self, update_db=False):
+    def start_mysql(self, update_db=False, disable_on_boot=False, timeout=120):
         LOG.info(_("Starting MySQL."))
         # This is the site of all the trouble in the restart tests.
         # Essentially what happens is that mysql start fails, but does not
         # die. It is then impossible to kill the original, so
-
-        self._enable_mysql_on_boot()
+        if disable_on_boot:
+            self._disable_mysql_on_boot()
+        else:
+            self._enable_mysql_on_boot()
 
         try:
             mysql_service = operating_system.service_discovery(
                 MYSQL_SERVICE_CANDIDATES)
-            utils.execute_with_timeout(mysql_service['cmd_start'], shell=True)
+            utils.execute_with_timeout(mysql_service['cmd_start'], shell=True,
+                                       timeout=timeout)
         except KeyError:
             raise RuntimeError("Service is not discovered.")
         except exception.ProcessExecutionError:
@@ -1045,6 +1096,75 @@ class MySqlApp(object):
         with LocalSqlClient(get_engine()) as client:
             client.execute("SELECT WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS('%s')"
                            % txn)
+
+    def _grant_cluster_replication_privilege(self, replication_user):
+        LOG.info(_("Granting Replication Slave privilege."))
+        with LocalSqlClient(get_engine()) as client:
+            perms = ['REPLICATION CLIENT', 'RELOAD', 'LOCK TABLES']
+            g = sql_query.Grant(permissions=perms,
+                                user=replication_user['name'],
+                                clear=replication_user['password'])
+            t = text(str(g))
+            client.execute(t)
+
+    def _bootstrap_cluster(self, timeout=120):
+        LOG.info(_("Bootstraping cluster."))
+        try:
+            mysql_service = operating_system.service_discovery(
+                MYSQL_SERVICE_CANDIDATES)
+            utils.execute_with_timeout(
+                mysql_service['cmd_bootstrap_pxc_cluster'],
+                shell=True, timeout=timeout)
+        except KeyError:
+            LOG.exception(_("Error bootstrapping cluster."))
+            raise RuntimeError(_("Service is not discovered."))
+
+    def _write_cluster_config(self, cluster_configuration):
+        LOG.info(_("Writing new temp cluster.cnf file."))
+
+        with open(MYCNF_CLUSTER_TMP, 'w') as cluster:
+            cluster.write(cluster_configuration)
+        operating_system.move(MYCNF_CLUSTER_TMP, MYCNF_CLUSTER,
+                              as_root=True)
+        operating_system.chmod(MYCNF_CLUSTER, FileMode.SET_GRP_RW_OTH_R,
+                               as_root=True)
+
+    def reset_admin_password(self, admin_password):
+        """Replace the password in the my.cnf file."""
+        # grant the new  admin password
+        with LocalSqlClient(get_engine()) as client:
+            self._create_admin_user(client, admin_password)
+            # reset the ENGINE because the password could have changed
+            global ENGINE
+            ENGINE = None
+
+        # write the new admin password to the my.cnf file
+        mycnf_file = read_mycnf()
+        old_admin_password = get_auth_password()
+        new_mycnf = mycnf_file.replace(old_admin_password, admin_password)
+        try:
+            with open(TMP_MYCNF, 'w') as t:
+                t.write(new_mycnf)
+            operating_system.move(TMP_MYCNF, MYSQL_CONFIG, as_root=True)
+        except Exception:
+            os.unlink(TMP_MYCNF)
+            raise
+
+    def install_cluster(self, replication_user, cluster_configuration,
+                        bootstrap=False):
+        LOG.info(_("Installing cluster configuration."))
+        self._grant_cluster_replication_privilege(replication_user)
+        self.stop_db()
+        LOG.debug("write out a cluster_configuration file in "
+                  "/etc/mysql/conf.d/cluster.cnf")
+        LOG.debug("bootstrap the instance? : %s" % bootstrap)
+        self._write_cluster_config(cluster_configuration)
+        self.wipe_ib_logfiles()
+        # Have to wait to sync up the joiner instances with the donor instance.
+        if bootstrap:
+            self._bootstrap_cluster(timeout=CONF.restore_usage_timeout)
+        else:
+            self.start_mysql(timeout=CONF.restore_usage_timeout)
 
 
 class MySqlRootAccess(object):

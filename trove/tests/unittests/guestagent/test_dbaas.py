@@ -839,9 +839,9 @@ class MySqlAppTest(testtools.TestCase):
              rd_instance.ServiceStatuses.SHUTDOWN.description}))
         self.assertEqual(2, mock_execute.call_count)
 
-    def test_stop_mysql_error(self):
+    @patch.object(utils, 'execute_with_timeout')
+    def test_stop_mysql_error(self, mock_execute):
 
-        dbaas.utils.execute_with_timeout = Mock()
         self.appStatus.set_next_status(rd_instance.ServiceStatuses.RUNNING)
         self.mySqlApp.state_change_wait_time = 1
         self.assertRaises(RuntimeError, self.mySqlApp.stop_db)

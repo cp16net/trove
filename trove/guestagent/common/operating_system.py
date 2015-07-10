@@ -292,6 +292,9 @@ def service_discovery(service_candidates):
         if os.path.isfile("/etc/init.d/%s" % service):
             result['cmd_start'] = "sudo service %s start" % service
             result['cmd_stop'] = "sudo service %s stop" % service
+            result['cmd_bootstrap_pxc_cluster'] = ("sudo service "
+                                                   "%s bootstrap-pxc"
+                                                   % service)
             if os.path.isfile("/usr/sbin/update-rc.d"):
                 result['cmd_enable'] = "sudo update-rc.d %s defaults; sudo " \
                                        "update-rc.d %s enable" % (service,
