@@ -130,7 +130,7 @@ class Manager(periodic_task.PeriodicTasks):
         app.install_if_needed(packages)
         if device_path:
             # stop and do not update database
-            app.stop_db()
+            app.stop_db(do_not_start_on_reboot=True)
             device = volume.VolumeDevice(device_path)
             # unmount if device is already mounted
             device.unmount_device(device_path)
@@ -168,6 +168,9 @@ class Manager(periodic_task.PeriodicTasks):
             app.secure_root(secure_remote_root=True)
 
         app.complete_install_or_restart()
+
+        if cluster_config:
+            app.status.set_status(rd_instance.ServiceStatuses.BUILD_PENDING)
 
         if databases:
             self.create_database(context, databases)
@@ -348,3 +351,26 @@ class Manager(periodic_task.PeriodicTasks):
         app = MySqlApp(MySqlAppStatus.get())
         replication = REPLICATION_STRATEGY_CLASS(context)
         replication.demote_master(app)
+
+    def install_cluster(self, context, replication_user, cluster_configuration,
+                        bootstrap):
+        app = MySqlApp(MySqlAppStatus.get())
+        try:
+            app.install_cluster(replication_user, cluster_configuration,
+                                bootstrap)
+            LOG.debug("install_cluster call has finished.")
+        except Exception:
+            LOG.exception(_('Cluster installation failed.'))
+            app.status.set_status(rd_instance.ServiceStatuses.FAILED)
+            raise
+
+    def reset_admin_password(self, context, admin_password):
+        LOG.debug("Storing the admin password on the instance.")
+        app = MySqlApp(MySqlAppStatus.get())
+        app.reset_admin_password(admin_password)
+
+    def cluster_complete(self, context):
+        LOG.debug("Cluster creation complete, starting status checks.")
+        app = MySqlApp(MySqlAppStatus.get())
+        status = app.status._get_actual_db_status()
+        app.status.set_status(status)
