@@ -54,7 +54,7 @@ class PXCAPIStrategy(base.BaseAPIStrategy):
 class PXCCluster(models.Cluster):
 
     @classmethod
-    def create(cls, context, name, datastore, datastore_version,
+    def create(cls, context, name, datastore, datastore_version, backup_id,
                instances, extended_properties):
         LOG.debug("Initiating PXC cluster creation.")
         pxc_conf = CONF.get(datastore_version.manager)
@@ -120,7 +120,7 @@ class PXCCluster(models.Cluster):
                                         datastore_version.image_id,
                                         [], [], datastore,
                                         datastore_version,
-                                        volume_size, None,
+                                        volume_size, backup_id,
                                         nics=nics[i],
                                         availability_zone=azs[i],
                                         configuration_id=None,

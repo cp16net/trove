@@ -96,13 +96,13 @@ class Manager(manager_base.BaseMySqlManager):
         LOG.debug("Securing MySQL now.")
         app.secure(config_contents, overrides)
         enable_root_on_restore = (backup_info and
-                                  MySqlAdmin().is_root_enabled())
+                                  self.mysql_admin().is_root_enabled())
         if root_password and not backup_info:
             app.secure_root(secure_remote_root=True)
-            MySqlAdmin().enable_root(root_password)
+            self.mysql_admin().enable_root(root_password)
         elif enable_root_on_restore:
             app.secure_root(secure_remote_root=False)
-            app.get().report_root(context, 'root')
+            self.mysql_app_status.get().report_root(context, 'root')
         else:
             app.secure_root(secure_remote_root=True)
 
