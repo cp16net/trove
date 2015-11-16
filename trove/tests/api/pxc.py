@@ -21,7 +21,10 @@ APIs tested for PXC are:
 4. resize-instance
 5. delete
 6. cluster-create
-7. cluster-delete
+7. test-cluster-communication
+8. grow-cluster
+9. test-cluster-grow-communication
+10. cluster-delete
 """
 
 from proboscis import asserts
@@ -196,7 +199,7 @@ class PXCTest(object):
         asserts.assert_raises(
             exceptions.BadRequest,
             self.rd_client.clusters.create,
-            "test_cluster",
+            "test-cluster-with-fewer-instances",
             self.instance.dbaas_datastore,
             self.instance.dbaas_datastore_version,
             instances=invalid_request_body_with_different_flavors)
@@ -212,7 +215,7 @@ class PXCTest(object):
         asserts.assert_raises(
             exceptions.BadRequest,
             self.rd_client.clusters.create,
-            "test_cluster",
+            "test-cluster-with-different-volumes",
             self.instance.dbaas_datastore,
             self.instance.dbaas_datastore_version,
             instances=invalid_request_body_with_different_volumes)
@@ -228,7 +231,7 @@ class PXCTest(object):
              "volume": self.instance.volume}]
 
         self.cluster = self.rd_client.clusters.create(
-            "test_cluster", self.instance.dbaas_datastore,
+            "test-cluster", self.instance.dbaas_datastore,
             self.instance.dbaas_datastore_version,
             instances=valid_request_body)
 
@@ -276,15 +279,14 @@ class PXCTest(object):
                     ["ERROR"] * len(cluster_instances),
                     [instance.status
                      for instance in cluster_instances])
-            self.report.log("Continue polling, cluster is not ready yet.")
 
+        self.report.log("Polling for cluster to become ready.")
         poll_until(result_is_active, sleep_time=SLEEP_TIME, time_out=TIMEOUT)
         self.report.log("Created cluster, ID = %s." % self.cluster.id)
 
-    @test(depends_on=[test_wait_until_cluster_is_active])
-    def test_cluster_communication(self):
+    def _test_cluster_communication(self, db_name='somenewdb'):
         databases = []
-        databases.append({"name": 'somenewdb'})
+        databases.append({"name": db_name})
         cluster = self.rd_client.clusters.get(self.cluster.id)
         cluster_instances = [
             self.rd_client.instances.get(instance['id'])
@@ -298,8 +300,50 @@ class PXCTest(object):
                 cluster_instances[0].id)
             asserts.assert_true(len(databases_before) < len(databases_after))
 
+    @test(depends_on=[test_wait_until_cluster_is_active])
+    def test_cluster_communication(self):
+        self._test_cluster_communication(db_name="clustercreatedb")
+
+    @test(depends_on=[test_cluster_communication])
+    def test_cluster_grow(self):
+        valid_request_body = [
+            {
+                "flavorRef": self.instance.dbaas_flavor_href,
+                "volume": self.instance.volume,
+            },
+        ]
+        self.cluster = self.rd_client.clusters.grow(
+            self.cluster,
+            instances=valid_request_body)
+        asserts.assert_equal(202, self.rd_client.last_http_code)
+
+    @test(depends_on=[test_cluster_grow])
+    def test_wait_until_cluster_grow_is_active(self):
+        self.test_wait_until_cluster_is_active()
+
+    @test(depends_on=[test_wait_until_cluster_grow_is_active])
+    def test_grow_cluster_has_existing_database(self):
+        cluster = self.rd_client.clusters.get(self.cluster.id)
+        cluster_instances = [
+            self.rd_client.instances.get(instance['id'])
+            for instance in cluster.instances]
+        found_db = False
+        for instance in cluster_instances:
+            databases = self.rd_client.databases.list(
+                cluster_instances[0].id)
+            for result in databases:
+                if result.name == 'clustercreatedb':
+                    found_db = True
+            msg = "Database 'clustercreatedb' not found in cluster databases"
+            asserts.assert_true(found_db, msg)
+            found_db = False
+
+    @test(depends_on=[test_grow_cluster_has_existing_database])
+    def test_grow_cluster_communication(self):
+        self._test_cluster_communication(db_name="clustergrowdb")
+
     @test(depends_on=[test_wait_until_cluster_is_active],
-          runs_after=[test_cluster_communication])
+          runs_after=[test_grow_cluster_communication])
     def test_cluster_delete(self):
 
         if not getattr(self, 'cluster', None):
