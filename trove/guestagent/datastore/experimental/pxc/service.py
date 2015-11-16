@@ -121,13 +121,16 @@ class PXCApp(service.BaseMySqlApp):
             LOG.exception(_("Error bootstrapping cluster."))
             raise RuntimeError(_("Service is not discovered."))
 
+    def write_cluster_configuration_overrides(self, cluster_configuration):
+        self.configuration_manager.apply_system_override(
+            cluster_configuration, CNF_CLUSTER)
+
     def install_cluster(self, replication_user, cluster_configuration,
                         bootstrap=False):
         LOG.info(_("Installing cluster configuration."))
         self._grant_cluster_replication_privilege(replication_user)
         self.stop_db()
-        self.configuration_manager.apply_system_override(cluster_configuration,
-                                                         CNF_CLUSTER)
+        self.write_cluster_configuration_overrides(cluster_configuration)
         self.wipe_ib_logfiles()
         LOG.debug("bootstrap the instance? : %s" % bootstrap)
         # Have to wait to sync up the joiner instances with the donor instance.
@@ -135,6 +138,20 @@ class PXCApp(service.BaseMySqlApp):
             self._bootstrap_cluster(timeout=CONF.restore_usage_timeout)
         else:
             self.start_mysql(timeout=CONF.restore_usage_timeout)
+
+    def get_cluster_context(self):
+        auth = self.configuration_manager.get_value('mysqld').get(
+            "wsrep_sst_auth").replace('"', '')
+        cluster_name = self.configuration_manager.get_value(
+            'mysqld').get("wsrep_cluster_name")
+        return {
+            'replication_user': {
+                'name': auth.split(":")[0],
+                'password': auth.split(":")[1],
+            },
+            'cluster_name': cluster_name,
+            'admin_password': self.get_auth_password()
+        }
 
 
 class PXCRootAccess(service.BaseMySqlRootAccess):

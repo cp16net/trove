@@ -196,13 +196,14 @@ class ClusterTest(trove_testtools.TestCase):
                           instances, {}
                           )
 
+    @patch.object(inst_models.DBInstance, 'find_all')
     @patch.object(inst_models.Instance, 'create')
     @patch.object(DBCluster, 'create')
     @patch.object(task_api, 'load')
     @patch.object(QUOTAS, 'check_quotas')
     @patch.object(remote, 'create_nova_client')
     def test_create(self, mock_client, mock_check_quotas, mock_task_api,
-                    mock_db_create, mock_ins_create):
+                    mock_db_create, mock_ins_create, mock_find_all):
         instances = self.instances
         flavors = Mock()
         mock_client.return_value.flavors = flavors
@@ -215,28 +216,7 @@ class ClusterTest(trove_testtools.TestCase):
             mock_db_create.return_value.id)
         self.assertEqual(3, mock_ins_create.call_count)
 
-    @patch.object(inst_models.Instance, 'create')
-    @patch.object(DBCluster, 'create')
-    @patch.object(task_api, 'load')
-    @patch.object(QUOTAS, 'check_quotas')
-    @patch.object(remote, 'create_nova_client')
-    def test_create_over_limit(self, mock_client, mock_check_quotas,
-                               mock_task_api, mock_db_create, mock_ins_create):
-        instances = [{'volume_size': 1, 'flavor_id': '1234'},
-                     {'volume_size': 1, 'flavor_id': '1234'},
-                     {'volume_size': 1, 'flavor_id': '1234'},
-                     {'volume_size': 1, 'flavor_id': '1234'}]
-        flavors = Mock()
-        mock_client.return_value.flavors = flavors
-        self.cluster.create(Mock(),
-                            self.cluster_name,
-                            self.datastore,
-                            self.datastore_version,
-                            instances, {})
-        mock_task_api.return_value.create_cluster.assert_called_with(
-            mock_db_create.return_value.id)
-        self.assertEqual(4, mock_ins_create.call_count)
-
+    @patch.object(inst_models.DBInstance, 'find_all')
     @patch.object(pxc_api, 'CONF')
     @patch.object(inst_models.Instance, 'create')
     @patch.object(DBCluster, 'create')
@@ -245,7 +225,8 @@ class ClusterTest(trove_testtools.TestCase):
     @patch.object(remote, 'create_nova_client')
     def test_create_with_ephemeral_flavor(self, mock_client, mock_check_quotas,
                                           mock_task_api, mock_db_create,
-                                          mock_ins_create, mock_conf):
+                                          mock_ins_create, mock_conf,
+                                          mock_find_all):
         class FakeFlavor:
             def __init__(self, flavor_id):
                 self.flavor_id = flavor_id
@@ -300,3 +281,22 @@ class ClusterTest(trove_testtools.TestCase):
         self.cluster.db_info.task_status = ClusterTasks.DELETING
         self.cluster.delete()
         mock_update_db.assert_called_with(task_status=ClusterTasks.DELETING)
+
+    @patch.object(inst_models.DBInstance, 'find_all')
+    @patch.object(DBCluster, 'update')
+    @patch.object(pxc_api, 'CONF')
+    @patch.object(inst_models.Instance, 'create')
+    @patch.object(task_api, 'load')
+    @patch.object(QUOTAS, 'check_quotas')
+    @patch.object(remote, 'create_nova_client')
+    def test_grow(self, mock_client, mock_check_quotas, mock_task_api,
+                  mock_inst_create, mock_conf, mock_update, mock_find_all):
+        mock_client.return_value.flavors = Mock()
+        self.cluster.grow(self.instances)
+        mock_update.assert_called_with(
+            task_status=ClusterTasks.GROWING_CLUSTER)
+        mock_find_all.assert_called_with(cluster_id=self.cluster_id)
+        mock_task_api.return_value.grow_cluster.assert_called_with(
+            self.db_info.id,
+            [mock_inst_create.return_value.id] * 3)
+        self.assertEqual(mock_inst_create.call_count, 3)

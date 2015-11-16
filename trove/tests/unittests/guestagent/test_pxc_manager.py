@@ -61,3 +61,27 @@ class GuestAgentManagerTest(testtools.TestCase):
         dbaas.PXCAppStatus.get.assert_any_call()
         dbaas.PXCApp.reset_admin_password.assert_called_with(
             admin_password)
+
+    def test_get_cluster_context(self):
+        mock_status = MagicMock()
+        dbaas.PXCAppStatus.get = MagicMock(return_value=mock_status)
+        cluster_context = {'cluster': 'info'}
+        dbaas.PXCApp.get_cluster_context = MagicMock(
+            return_value=cluster_context)
+
+        self.manager.get_cluster_context(self.context)
+        dbaas.PXCAppStatus.get.assert_any_call()
+        dbaas.PXCApp.get_cluster_context.assert_any_call()
+
+    def test_write_cluster_configuration_overrides(self):
+        mock_status = MagicMock()
+        dbaas.PXCAppStatus.get = MagicMock(return_value=mock_status)
+
+        dbaas.PXCApp.write_cluster_configuration_overrides = MagicMock()
+
+        cluster_configuration = "cluster_configuration"
+        self.manager.write_cluster_configuration_overrides(
+            self.context, cluster_configuration)
+        dbaas.PXCAppStatus.get.assert_any_call()
+        dbaas.PXCApp.write_cluster_configuration_overrides.assert_called_with(
+            cluster_configuration)
