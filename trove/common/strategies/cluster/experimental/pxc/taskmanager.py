@@ -114,7 +114,8 @@ class PXCClusterTasks(task_models.ClusterTasks):
                     # render the conf.d/cluster.cnf configuration
                     cluster_configuration = self._render_cluster_config(
                         context,
-                        instance, ",".join(cluster_ips),
+                        instance,
+                        ",".join(cluster_ips),
                         cluster_name,
                         replication_user)
 
@@ -205,7 +206,8 @@ class PXCClusterTasks(task_models.ClusterTasks):
                 # render the conf.d/cluster.cnf configuration
                 cluster_configuration = self._render_cluster_config(
                     context,
-                    instance, ",".join(existing_cluster_ips + new_cluster_ips),
+                    instance,
+                    ",".join(existing_cluster_ips + new_cluster_ips),
                     cluster_context['cluster_name'],
                     cluster_context['replication_user'])
                 guest.write_cluster_configuration_overrides(
@@ -231,3 +233,56 @@ class PXCClusterTasks(task_models.ClusterTasks):
             timeout.cancel()
 
         LOG.debug("End grow_cluster for id: %s." % cluster_id)
+
+    def shrink_cluster(self, context, cluster_id, removal_instance_ids):
+        LOG.debug("Begin pxc shrink_cluster for id: %s." % cluster_id)
+
+        def _shrink_cluster():
+            removal_instances = [Instance.load(context.db_inst.id)
+                                 for db_inst in removal_instance_ids]
+            for instance in removal_instances:
+                Instance.delete(instance)
+                instance.update_db(cluster_id=None)
+
+            db_instances = DBInstance.find_all(cluster_id=cluster_id).all()
+            leftover_instances = [Instance.load(context, db_inst.id)
+                                  for db_inst in db_instances
+                                  if db_inst.id not in removal_instance_ids]
+            leftover_cluster_ips = [self.get_ip(instance) for instance in
+                                    leftover_instances]
+
+            # Get config changes for left over instances
+            rnd_cluster_guest = self.get_guest(leftover_instances[0])
+            cluster_context = rnd_cluster_guest.get_cluster_context()
+
+            # apply the new config to all leftover instances
+            for instance in leftover_instances:
+                guest = self.get_guest(instance)
+                # render the conf.d/cluster.cnf configuration
+                cluster_configuration = self._render_cluster_config(
+                    context,
+                    instance,
+                    ",".join(leftover_cluster_ips),
+                    cluster_context['cluster_name'],
+                    cluster_context['replication_user'])
+                guest.write_cluster_configuration_overrides(
+                    cluster_configuration)
+
+            self.reset_task()
+
+        timeout = Timeout(CONF.cluster_usage_timeout)
+        try:
+            _shrink_cluster()
+            self.reset_task()
+        except Timeout as t:
+            if t is not timeout:
+                raise  # not my timeout
+            LOG.exception(_("Timeout for shrinking cluster."))
+            self.update_statuses_on_failure(cluster_id)
+        except Exception:
+            LOG.exception(_("Error shrinking cluster %s.") % cluster_id)
+            self.update_statuses_on_failure(cluster_id)
+        finally:
+            timeout.cancel()
+
+        LOG.debug("End shrink_cluster for id: %s." % cluster_id)

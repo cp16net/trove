@@ -16,10 +16,12 @@ from oslo_log import log as logging
 
 
 from trove.cluster import models
+from trove.cluster.models import Cluster
 from trove.cluster.tasks import ClusterTasks
 from trove.cluster.views import ClusterView
 from trove.common import cfg
 from trove.common import exception
+from trove.common.i18n import _
 from trove.common import remote
 from trove.common.strategies.cluster import base
 from trove.common import utils
@@ -44,6 +46,7 @@ class PXCAPIStrategy(base.BaseAPIStrategy):
     def cluster_controller_actions(self):
         return {
             'grow': self._action_grow_cluster,
+            'shrink': self._action_shrink_cluster,
         }
 
     def _action_grow_cluster(self, cluster, body):
@@ -59,6 +62,11 @@ class PXCAPIStrategy(base.BaseAPIStrategy):
                 instance['volume_size'] = int(node['volume']['size'])
             instances.append(instance)
         return cluster.grow(instances)
+
+    def _action_shrink_cluster(self, cluster, body):
+        instances = body['shrink']
+        instance_ids = [instance['id'] for instance in instances]
+        return cluster.shrink(instance_ids)
 
     @property
     def cluster_view_class(self):
@@ -178,7 +186,7 @@ class PXCCluster(models.Cluster):
         return PXCCluster(context, db_info, datastore, datastore_version)
 
     def grow(self, instances):
-        LOG.debug("Growing cluster.")
+        LOG.debug("Growing cluster %s." % self.id)
 
         self.validate_cluster_available()
 
@@ -195,6 +203,27 @@ class PXCCluster(models.Cluster):
 
         task_api.load(context, datastore_version.manager).grow_cluster(
             db_info.id, [instance.id for instance in new_instances])
+
+        return PXCCluster(context, db_info, datastore, datastore_version)
+
+    def shrink(self, instances):
+        """Removes instances from a cluster."""
+        LOG.debug("Shrinking cluster %s." % self.id)
+
+        context = self.context
+        db_info = self.db_info
+        datastore = self.ds
+        datastore_version = self.ds_version
+
+        self.validate_cluster_available()
+        cluster_info = self.db_info
+        cluster_info.update(task_status=ClusterTasks.SHRINKING_CLUSTER)
+
+        removal_instances = [Instance.load(self.context, inst_id)
+                             for inst_id in instances]
+
+        task_api.load(context, datastore_version.manager).shrink_cluster(
+            db_info.id, [instance.id for instance in removal_instances])
 
         return PXCCluster(context, db_info, datastore, datastore_version)
 
